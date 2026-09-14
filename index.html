@@ -1688,21 +1688,40 @@
         }
         const visitEl = document.getElementById('analytics-visit-count');
         if (visitEl) visitEl.textContent = visits.toLocaleString();
-        // Silent GoatCounter session event (no UI elements added)
+        // Silent GoatCounter session event (no UI elements added).
+        // Wait for the GoatCounter script to be available (it loads async and may be blocked).
         try {
-          // Only record once per browser session to avoid double-counting
-          if (window.goatcounter && typeof window.goatcounter.count === 'function' && !sessionStorage.getItem('goatcounter_session_recorded')) {
-            sessionStorage.setItem('goatcounter_session_recorded', '1');
-            // Send a silent custom event to GoatCounter. This records that a user/session accessed
-            // the site without adding any visible UI to the page.
-            window.goatcounter.count({
-              path: '/session',
-              title: 'session',
-              event: true
-            });
+          const recordGoatCounter = () => {
+            try {
+              if (window.goatcounter && typeof window.goatcounter.count === 'function' && !sessionStorage.getItem('goatcounter_session_recorded')) {
+                sessionStorage.setItem('goatcounter_session_recorded', '1');
+                window.goatcounter.count({ path: '/session', title: 'session', event: true });
+              }
+            } catch (e) {
+              // ignore
+            }
+          };
+
+          if (window.goatcounter && typeof window.goatcounter.count === 'function') {
+            recordGoatCounter();
+          } else {
+            const gcScript = document.querySelector('script[data-goatcounter]');
+            if (gcScript) {
+              gcScript.addEventListener('load', () => setTimeout(recordGoatCounter, 10));
+            }
+            // Fallback polling for the rare case the script initializes after load
+            let tries = 0;
+            const poll = setInterval(() => {
+              if (window.goatcounter && typeof window.goatcounter.count === 'function') {
+                clearInterval(poll);
+                recordGoatCounter();
+              } else if (++tries > 50) {
+                clearInterval(poll);
+              }
+            }, 200);
           }
         } catch (e) {
-          // swallow any GoatCounter errors to avoid breaking the page
+          // ignore
         }
 
         let inspected = parseInt(localStorage.getItem('mru_peaks_inspected') || '0', 10);
