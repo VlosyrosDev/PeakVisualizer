@@ -1,0 +1,1731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Mauritius 3D Peak Visualizer</title>
+  <style>
+    :root {
+      --bg-color: #04070d;
+      --panel-bg: rgba(10, 18, 32, 0.88);
+      --panel-border: rgba(255, 255, 255, 0.12);
+      --accent-color: #ff2a55;
+      --accent-green: #2ecc71;
+      --accent-blue: #3498db;
+      --accent-gold: #f39c12;
+      --text-main: #f0f4fc;
+      --text-muted: #8a9bb5;
+      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-color);
+      font-family: var(--font-family);
+      color: var(--text-main);
+      touch-action: none;
+    }
+
+    #webgl-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      touch-action: none;
+    }
+
+    /* Floating Header */
+    .top-bar {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      right: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .brand-card {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      padding: 9px 16px;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      pointer-events: auto;
+      flex-shrink: 0;
+    }
+
+    .brand-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-title .badge {
+      background: linear-gradient(135deg, #ff2a55, #ff6b8b);
+      color: #fff;
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 6px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .brand-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Search Box */
+    .search-container {
+      position: relative;
+      pointer-events: auto;
+      width: 270px;
+      max-width: 100%;
+    }
+
+    .search-input {
+      width: 100%;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      padding: 10px 14px 10px 36px;
+      border-radius: 12px;
+      color: var(--text-main);
+      font-size: 13px;
+      outline: none;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+
+    .search-input:focus {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.35);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      font-size: 14px;
+      pointer-events: none;
+    }
+
+    .search-results {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      right: 0;
+      background: #0b1424;
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      max-height: 220px;
+      overflow-y: auto;
+      display: none;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7);
+      z-index: 25;
+    }
+
+    .search-item {
+      padding: 10px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      transition: background 0.15s;
+    }
+
+    .search-item:hover, .search-item:active {
+      background: rgba(52, 152, 219, 0.25);
+    }
+
+    .search-item .item-elev {
+      color: var(--accent-green);
+      font-weight: 600;
+    }
+
+    /* Control Sidebar / Mobile Drawer */
+    .controls-panel {
+      position: absolute;
+      top: 76px;
+      left: 14px;
+      width: 310px;
+      max-height: calc(100% - 94px);
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+      z-index: 10;
+      overflow-y: auto;
+      transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+    }
+
+    .controls-panel.collapsed {
+      transform: translateX(-340px);
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    .drawer-handle {
+      display: none;
+      width: 40px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.25);
+      border-radius: 2px;
+      margin: 0 auto 12px auto;
+    }
+
+    .toggle-panel-btn {
+      position: absolute;
+      left: 14px;
+      bottom: 18px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      color: var(--text-main);
+      padding: 9px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      z-index: 11;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+      transition: all 0.2s ease;
+    }
+
+    .toggle-panel-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      transform: translateY(-1px);
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .section-title:first-child {
+      margin-top: 0;
+    }
+
+    /* Counter Badge */
+    .counter-badge {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .counter-num {
+      font-size: 18px;
+      font-weight: 800;
+      color: #ffffff;
+      font-feature-settings: "tnum";
+    }
+
+    .counter-num span {
+      color: var(--accent-green);
+    }
+
+    /* Range Sliders */
+    .slider-group {
+      margin-bottom: 14px;
+    }
+
+    .slider-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-bottom: 6px;
+      color: #d1dbe8;
+    }
+
+    .slider-value {
+      font-weight: 700;
+      color: var(--accent-blue);
+      font-feature-settings: "tnum";
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.16);
+      outline: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #ffffff;
+      border: 2px solid var(--accent-blue);
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+      transition: transform 0.15s ease;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.15);
+    }
+
+    /* Switch Toggles */
+    .toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      font-size: 12px;
+      color: #d1dbe8;
+      cursor: pointer;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 38px;
+      height: 22px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider-round {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: rgba(255, 255, 255, 0.2);
+      transition: 0.25s;
+      border-radius: 22px;
+    }
+
+    .slider-round:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.25s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider-round {
+      background-color: var(--accent-green);
+    }
+
+    input:checked + .slider-round:before {
+      transform: translateX(16px);
+    }
+
+    /* Quick Filter Chips */
+    .chip-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    .chip {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      padding: 6px 11px;
+      border-radius: 8px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .chip:hover {
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    .chip.active {
+      background: var(--accent-blue);
+      border-color: var(--accent-blue);
+      font-weight: 600;
+    }
+
+    /* Camera Presets */
+    .preset-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .preset-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 11px;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s;
+    }
+
+    .preset-btn:hover {
+      background: rgba(52, 152, 219, 0.25);
+      border-color: rgba(52, 152, 219, 0.5);
+    }
+
+    /* Keyboard Help Box */
+    .controls-help {
+      margin-top: 14px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .controls-help kbd {
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-family: monospace;
+      font-size: 10px;
+    }
+
+    /* Inspector Card */
+    .inspector-card {
+      position: absolute;
+      bottom: 18px;
+      right: 18px;
+      width: 310px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+      z-index: 15;
+      display: none;
+      animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .inspector-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+
+    .inspector-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.2;
+    }
+
+    .inspector-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 20px;
+      cursor: pointer;
+      line-height: 1;
+      padding: 2px 6px;
+    }
+
+    .inspector-close:hover {
+      color: #fff;
+    }
+
+    .inspector-metric-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .metric-box {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 10px;
+      padding: 9px 12px;
+    }
+
+    .metric-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .metric-val {
+      font-size: 17px;
+      font-weight: 800;
+      color: var(--accent-green);
+      margin-top: 2px;
+    }
+
+    .inspector-tag {
+      display: inline-block;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 5px;
+      background: rgba(52, 152, 219, 0.2);
+      color: #70b7f5;
+      margin-bottom: 12px;
+      text-transform: capitalize;
+    }
+
+    .inspector-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-action {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s;
+      text-decoration: none;
+    }
+
+    .btn-fly {
+      background: var(--accent-color);
+      color: #fff;
+    }
+
+    .btn-fly:hover {
+      background: #ff476d;
+    }
+
+    .btn-link {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+
+    .btn-link:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* CSS2D Peak Badges */
+    .peak-label-badge {
+      background: rgba(5, 10, 20, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: #ffffff;
+      padding: 2px 7px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      pointer-events: none;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.7);
+      transform: translate(-50%, -100%);
+      transition: opacity 0.2s;
+    }
+
+    .peak-label-badge .elev-tag {
+      color: #2ecc71;
+      margin-left: 4px;
+      font-weight: 600;
+    }
+
+    /* Loading Overlay */
+    #loading-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #04070d;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      transition: opacity 0.4s ease;
+    }
+
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      border-top-color: var(--accent-color);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 16px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-text {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: #f0f4fc;
+    }
+
+    .loading-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 5px;
+    }
+
+    /* =========================================================================
+       Mobile Responsive Media Queries (Phones & Tablets)
+       ========================================================================= */
+    @media (max-width: 768px) {
+      .top-bar {
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+
+      .brand-card {
+        padding: 8px 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .brand-title {
+        font-size: 13px;
+      }
+
+      .brand-sub {
+        display: none;
+      }
+
+      .search-container {
+        width: 100%;
+      }
+
+      .search-input {
+        padding: 9px 12px 9px 34px;
+        font-size: 12px;
+      }
+
+      /* Mobile Drawer (Slides up from bottom) */
+      .controls-panel {
+        top: auto;
+        bottom: 10px;
+        left: 10px;
+        right: 10px;
+        width: auto;
+        max-height: 60vh;
+        transform: translateY(calc(100% + 20px));
+        opacity: 0;
+        pointer-events: none;
+        border-radius: 20px;
+        padding: 14px 16px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.85);
+      }
+
+      .controls-panel.open {
+        transform: translateY(0);
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .drawer-handle {
+        display: block;
+      }
+
+      .controls-help {
+        display: none; /* Hide keyboard shortcut help on mobile touch devices */
+      }
+
+      .toggle-panel-btn {
+        bottom: 14px;
+        left: 14px;
+        padding: 10px 16px;
+        font-size: 12px;
+        border-radius: 22px;
+      }
+
+      .inspector-card {
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        width: auto;
+        border-radius: 18px;
+        padding: 15px;
+      }
+
+      input[type="range"]::-webkit-slider-thumb {
+        width: 24px;
+        height: 24px;
+      }
+
+      .peak-label-badge {
+        font-size: 10px;
+        padding: 2px 5px;
+      }
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.1); }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
+  </style>
+
+  <!-- Local Offline Libraries -->
+  <script src="lib/three.min.js"></script>
+  <script src="lib/OrbitControls.js"></script>
+  <script src="lib/CSS2DRenderer.js"></script>
+  <!-- Data assets -->
+  <script src="texture_data.js"></script>
+  <script src="data.js"></script>
+
+  <!-- =========================================================================
+       Website Analytics Configuration
+       To enable public visitor tracking when hosting online:
+       1. Google Analytics 4: Set GA_MEASUREMENT_ID to your "G-XXXXXXXXXX"
+       2. GoatCounter (free/privacy-first): Set GOATCOUNTER_CODE to your subdomain
+       3. Cloudflare Web Analytics: Set CLOUDFLARE_BEACON_TOKEN to your token
+       ========================================================================= -->
+  <script>
+    window.ANALYTICS_CONFIG = {
+      GA_MEASUREMENT_ID: "",        // e.g. "G-1234567890"
+      GOATCOUNTER_CODE: "",         // e.g. "mauritius-peaks" (counts on https://mauritius-peaks.goatcounter.com)
+      CLOUDFLARE_BEACON_TOKEN: ""   // e.g. "abcdef123456"
+    };
+
+    // Dynamically load configured analytics provider when online
+    (function initRemoteAnalytics() {
+      if (window.location.protocol === 'file:') return; // skip remote calls on local disk
+
+      // 1. Google Analytics 4
+      if (window.ANALYTICS_CONFIG.GA_MEASUREMENT_ID) {
+        const gaScript = document.createElement('script');
+        gaScript.async = true;
+        gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=' + window.ANALYTICS_CONFIG.GA_MEASUREMENT_ID;
+        document.head.appendChild(gaScript);
+
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){ dataLayer.push(arguments); }
+        window.gtag = gtag;
+        gtag('js', new Date());
+        gtag('config', window.ANALYTICS_CONFIG.GA_MEASUREMENT_ID, {
+          page_title: 'Mauritius 3D Peak Visualizer',
+          anonymize_ip: true
+        });
+      }
+
+      // 2. GoatCounter (free & privacy-friendly)
+      if (window.ANALYTICS_CONFIG.GOATCOUNTER_CODE) {
+        const gcScript = document.createElement('script');
+        gcScript.async = true;
+        gcScript.dataset.goatcounter = 'https://' + window.ANALYTICS_CONFIG.GOATCOUNTER_CODE + '.goatcounter.com/count';
+        gcScript.src = '//gc.zgo.at/count.js';
+        document.head.appendChild(gcScript);
+      }
+
+      // 3. Cloudflare Web Analytics
+      if (window.ANALYTICS_CONFIG.CLOUDFLARE_BEACON_TOKEN) {
+        const cfScript = document.createElement('script');
+        cfScript.defer = true;
+        cfScript.src = 'https://static.cloudflareinsights.com/beacon.min.js';
+        cfScript.dataset.cfBeacon = JSON.stringify({ token: window.ANALYTICS_CONFIG.CLOUDFLARE_BEACON_TOKEN });
+        document.head.appendChild(cfScript);
+      }
+    })();
+  </script>
+</head>
+<body>
+
+  <!-- Loading Screen -->
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <div class="loading-text">Loading 3D Topography...</div>
+    <div class="loading-sub">Applying mountain relief shading & satellite drape</div>
+  </div>
+
+  <!-- 3D Canvas -->
+  <div id="webgl-container"></div>
+
+  <!-- Top Floating Bar -->
+  <div class="top-bar">
+    <div class="brand-card">
+      <div class="brand-title">
+        MAURITIUS 3D PEAKS <span class="badge">3D Relief</span>
+      </div>
+      <div class="brand-sub">High-Resolution DEM & Satellite Topography</div>
+    </div>
+
+    <div class="search-container">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="peak-search" class="search-input" placeholder="Search named peaks (e.g. Pieter Both)..." />
+      <div id="search-results" class="search-results"></div>
+    </div>
+  </div>
+
+  <!-- Controls Panel (Desktop Sidebar / Mobile Drawer) -->
+  <div class="controls-panel collapsed" id="controls-panel">
+    <div class="drawer-handle" onclick="toggleSidebar()"></div>
+
+    <div class="counter-badge">
+      <div>
+        <div style="font-size: 10px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Visible Peaks</div>
+        <div class="counter-num"><span id="visible-count">773</span> / 773</div>
+      </div>
+      <div style="text-align: right;">
+        <div style="font-size: 10px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Elev Range</div>
+        <div style="font-size: 12px; font-weight: 700; color: #fff;">102m — 819m</div>
+      </div>
+    </div>
+
+    <!-- Quick Filter Chips -->
+    <div class="section-title">Quick Filters</div>
+    <div class="chip-group">
+      <div class="chip active" onclick="applyQuickFilter('all', this)">All Peaks</div>
+      <div class="chip" onclick="applyQuickFilter('named', this)">Named Only</div>
+      <div class="chip" onclick="applyQuickFilter('high', this)">> 500m</div>
+      <div class="chip" onclick="applyQuickFilter('top10', this)">Top 10</div>
+      <div class="chip" onclick="applyQuickFilter('protected', this)">Protected</div>
+    </div>
+
+    <!-- Sliders -->
+    <div class="section-title">Elevation & Relief Controls</div>
+    <div class="slider-group">
+      <div class="slider-label">
+        <span>Min Elevation</span>
+        <span class="slider-value" id="min-elev-val">0 m</span>
+      </div>
+      <input type="range" id="min-elev-slider" min="0" max="820" value="0" step="5" />
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span>Z Vertical Exaggeration</span>
+        <span class="slider-value" id="z-exag-val">2.2×</span>
+      </div>
+      <input type="range" id="z-exag-slider" min="1.0" max="4.0" value="2.2" step="0.1" />
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span>Relief Outline & Contrast</span>
+        <span class="slider-value" id="contrast-val">75%</span>
+      </div>
+      <input type="range" id="contrast-slider" min="0" max="100" value="75" step="5" />
+    </div>
+
+    <div class="slider-group">
+      <div class="slider-label">
+        <span>Peak Marker Size</span>
+        <span class="slider-value" id="marker-size-val">100%</span>
+      </div>
+      <input type="range" id="marker-size-slider" min="40" max="180" value="100" step="5" />
+    </div>
+
+    <!-- Toggles -->
+    <div class="section-title">Display Options</div>
+    <label class="toggle-row">
+      <span>Show Named Peaks Only</span>
+      <div class="switch">
+        <input type="checkbox" id="toggle-named" />
+        <span class="slider-round"></span>
+      </div>
+    </label>
+
+    <label class="toggle-row">
+      <span>Show Mountain Name Badges</span>
+      <div class="switch">
+        <input type="checkbox" id="toggle-labels" checked />
+        <span class="slider-round"></span>
+      </div>
+    </label>
+
+    <!-- Camera Views -->
+    <div class="section-title">Camera Views</div>
+    <div class="preset-grid">
+      <button class="preset-btn" onclick="setCameraView('overview')">🏝️ Island View</button>
+      <button class="preset-btn" onclick="setCameraView('portlouis')">🏙️ Port Louis Range</button>
+      <button class="preset-btn" onclick="setCameraView('southwest')">⛰️ Black River Gorges</button>
+      <button class="preset-btn" onclick="setCameraView('topdown')">🗺️ Top-Down Map</button>
+    </div>
+
+    <!-- Website Analytics Card -->
+    <div class="section-title">Site Analytics & Traffic</div>
+    <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px;font-size:12px;margin-bottom:6px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="color:var(--text-muted);">Visitor Sessions</span>
+        <span style="color:var(--accent-green);font-weight:700;font-size:15px;" id="analytics-visit-count">1</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="color:var(--text-muted);">Peaks Explored</span>
+        <span style="color:var(--accent-blue);font-weight:700;" id="analytics-inspect-count">0</span>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);border-top:1px solid rgba(255,255,255,0.06);padding-top:8px;margin-top:6px;line-height:1.4;">
+        <span style="color:#2ecc71;">●</span> Analytics active. Connect GA4 or GoatCounter in <code style="background:rgba(255,255,255,0.1);padding:1px 4px;border-radius:3px;">index.html</code>.
+      </div>
+    </div>
+
+    <!-- Desktop Controls Legend -->
+    <div class="controls-help">
+      <strong>Navigation:</strong><br/>
+      • Left Click / 1 Finger: Rotate<br/>
+      • Right Click / 2 Fingers: Pan<br/>
+      • Scroll / Pinch: Zoom<br/>
+      • <kbd>W</kbd><kbd>S</kbd><kbd>A</kbd><kbd>D</kbd> or Arrows: Fly<br/>
+      • <kbd>Q</kbd> / <kbd>E</kbd>: Altitude
+    </div>
+  </div>
+
+  <!-- Toggle Sidebar Button -->
+  <button class="toggle-panel-btn" onclick="toggleSidebar()">
+    <span id="panel-btn-icon">⚙️</span> <span>Filters & Settings</span>
+  </button>
+
+  <!-- Inspector Card -->
+  <div class="inspector-card" id="inspector-card">
+    <div class="inspector-header">
+      <div>
+        <div class="inspector-title" id="insp-name">Pieter Both</div>
+        <div id="insp-tag" class="inspector-tag">Protected Peak</div>
+      </div>
+      <button class="inspector-close" onclick="closeInspector()">✕</button>
+    </div>
+
+    <div class="inspector-metric-row">
+      <div class="metric-box">
+        <div class="metric-label">DEM Elevation</div>
+        <div class="metric-val" id="insp-elev">734 m</div>
+      </div>
+      <div class="metric-box" id="insp-known-box">
+        <div class="metric-label">Known Elevation</div>
+        <div class="metric-val" id="insp-known" style="color: #3498db;">820 m</div>
+      </div>
+    </div>
+
+    <div class="inspector-actions">
+      <button class="btn-action btn-fly" id="insp-fly-btn">🎯 Fly To Peak</button>
+      <a href="#" target="_blank" class="btn-action btn-link" id="insp-url-btn">🌐 More Info</a>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 1. Scene Setup & High-Performance Scale Configuration
+    // =========================================================================
+    const SCALE = 0.01; // 1 unit = 100 meters
+    let zExaggeration = 2.2;
+    let reliefContrast = 0.75; // 0.0 to 1.0
+
+    let scene, camera, renderer, labelRenderer, controls;
+    let terrainMesh, oceanMesh;
+    let terrainShaderUniforms = null;
+    let peakInstancedMesh;
+    let selectedMarkerMesh;
+    let peakLabels = [];
+    let elevationGrid;
+    let selectedPeakIndex = -1;
+
+    // Camera animation state
+    let targetCameraPos = null;
+    let targetLookAt = null;
+    let isAnimatingCamera = false;
+    let renderRequested = true;
+
+    const container = document.getElementById('webgl-container');
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const dummy = new THREE.Object3D();
+
+    function requestRender() {
+      renderRequested = true;
+    }
+
+    function initScene() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x04070d);
+      scene.fog = new THREE.FogExp2(0x04070d, 0.00065);
+
+      const aspect = window.innerWidth / window.innerHeight;
+      camera = new THREE.PerspectiveCamera(45, aspect, 1.0, 7000.0);
+
+      // WebGL Renderer with performance-minded pixel ratio clamping
+      const isMobile = window.innerWidth < 768;
+      const maxDPR = isMobile ? 1.5 : 2.0;
+
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        powerPreference: "high-performance",
+        stencil: false
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDPR));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      // Exposure adjusted for rich contrast (not washed out)
+      renderer.toneMappingExposure = 0.88;
+      container.appendChild(renderer.domElement);
+
+      // CSS2D Renderer for Peak Labels
+      labelRenderer = new THREE.CSS2DRenderer();
+      labelRenderer.setSize(window.innerWidth, window.innerHeight);
+      labelRenderer.domElement.style.position = 'absolute';
+      labelRenderer.domElement.style.top = '0';
+      labelRenderer.domElement.style.pointerEvents = 'none';
+      container.appendChild(labelRenderer.domElement);
+
+      // OrbitControls with smooth damping
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.09;
+      controls.maxPolarAngle = Math.PI / 2 - 0.04;
+      controls.minDistance = 15.0;
+      controls.maxDistance = 2200.0;
+      controls.addEventListener('change', () => {
+        requestRender();
+        if (peakLabels.length) updatePeakLabelsVisibility();
+      });
+
+      // Default Camera View
+      setCameraView('overview', false);
+
+      // =======================================================================
+      // Directional Lighting & Rich Relief Hillshading
+      // =======================================================================
+      // Reduced ambient light so shadows have real depth and contrast
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.22);
+      scene.add(ambientLight);
+
+      // Directional Sun Light placed at North-West (cartographic standard 315° azimuth, 38° altitude)
+      // This produces crisp, natural relief shading across all Mauritius volcanic craters & ridges!
+      const sunLight = new THREE.DirectionalLight(0xfff5e6, 1.35);
+      sunLight.position.set(-360, 280, -360);
+      scene.add(sunLight);
+
+      // Gentle subtle fill light from South-East ocean
+      const fillLight = new THREE.DirectionalLight(0x406898, 0.35);
+      fillLight.position.set(300, 180, 300);
+      scene.add(fillLight);
+
+      // Build 3D Terrain, Ocean, and Peaks
+      buildTerrain();
+      buildOcean();
+      buildPeakInstancedMesh();
+      buildPeakLabels();
+
+      // Window resize listener
+      window.addEventListener('resize', onWindowResize, false);
+
+      // Pointer events for raycasting
+      renderer.domElement.addEventListener('pointerdown', onPointerDown, false);
+      renderer.domElement.addEventListener('click', onPointerClick, false);
+
+      // Keyboard navigation
+      window.addEventListener('keydown', onKeyDown, false);
+
+      // Desktop starts open, Mobile starts collapsed
+      if (!isMobile) {
+        document.getElementById('controls-panel').classList.remove('collapsed');
+      }
+
+      // Hide loading screen
+      setTimeout(() => {
+        loadingOverlay.style.opacity = '0';
+        setTimeout(() => loadingOverlay.style.display = 'none', 400);
+        requestRender();
+      }, 350);
+
+      // Animation loop
+      animate();
+    }
+
+    // =========================================================================
+    // 2. Build 3D Terrain Mesh with Dark Relief Outlining & Contrast Shader
+    // =========================================================================
+    function decodeElevationGrid() {
+      const binaryString = atob(TERRAIN.elevationBase64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      return new Int16Array(bytes.buffer);
+    }
+
+    function buildTerrain() {
+      elevationGrid = decodeElevationGrid();
+
+      const worldW = TERRAIN.width * SCALE;
+      const worldH = TERRAIN.height * SCALE;
+      const cols = TERRAIN.cols;
+      const rows = TERRAIN.rows;
+
+      const geometry = new THREE.PlaneGeometry(worldW, worldH, cols - 1, rows - 1);
+      
+      // Populate vertex heights along local normal
+      const pos = geometry.attributes.position;
+      for (let i = 0; i < elevationGrid.length; i++) {
+        const elevMeters = elevationGrid[i] / 10.0;
+        pos.setZ(i, elevMeters * SCALE * zExaggeration);
+      }
+      pos.needsUpdate = true;
+      geometry.computeVertexNormals();
+
+      // Satellite Texture
+      const textureLoader = new THREE.TextureLoader();
+      const textureSource = (window.TEXTURE_DATA_URI) ? window.TEXTURE_DATA_URI : 'texture.jpg';
+      const satTexture = textureLoader.load(textureSource, () => requestRender());
+      satTexture.minFilter = THREE.LinearFilter;
+      satTexture.magFilter = THREE.LinearFilter;
+      satTexture.generateMipmaps = true;
+
+      // MeshStandardMaterial enhanced with custom GLSL for dark mountain relief outlines
+      const material = new THREE.MeshStandardMaterial({
+        map: satTexture,
+        roughness: 0.85,
+        metalness: 0.02,
+        flatShading: false
+      });
+
+      // Custom GLSL injection for dark relief outlining & contrast boost
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uReliefContrast = { value: reliefContrast };
+        terrainShaderUniforms = shader.uniforms;
+
+        // Vertex shader: compute world normal and world position
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <common>',
+          `#include <common>
+           varying vec3 vWorldNormal;
+           varying vec3 vWorldPosition;`
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <worldpos_vertex>',
+          `#include <worldpos_vertex>
+           vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+           vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+        );
+
+        // Fragment shader: detect steep mountain slopes and crest edges to apply dark contour outlines
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <common>',
+          `#include <common>
+           varying vec3 vWorldNormal;
+           varying vec3 vWorldPosition;
+           uniform float uReliefContrast;`
+        );
+
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+           // Mountain relief slope: 0.0 on flat coastal plains, up to 1.0 on steep mountain cliffs
+           float slope = clamp(1.0 - abs(vWorldNormal.y), 0.0, 1.0);
+
+           // Detect sharp ridge lines and crest silhouettes using normal rate-of-change
+           float normalGrad = length(fwidth(vWorldNormal));
+           float ridgeOutline = smoothstep(0.03, 0.22, normalGrad);
+
+           // Dark crevice shading on steep volcanic slopes
+           float slopeShade = smoothstep(0.16, 0.72, slope);
+
+           // Combined dark mountain relief outline
+           float darkOutline = clamp(ridgeOutline * 0.55 + slopeShade * 0.42, 0.0, 0.75);
+
+           // Rich color saturation & S-curve contrast boost on satellite texture
+           vec3 col = diffuseColor.rgb;
+           col = (col - 0.5) * 1.22 + 0.5; // contrast punch
+           col = clamp(col, 0.0, 1.0);
+
+           // Apply dark outline to mountain reliefs
+           col *= (1.0 - darkOutline * uReliefContrast);
+
+           diffuseColor.rgb = col;
+          `
+        );
+      };
+
+      terrainMesh = new THREE.Mesh(geometry, material);
+      terrainMesh.rotation.x = -Math.PI / 2;
+      scene.add(terrainMesh);
+    }
+
+    // =========================================================================
+    // 3. Ocean Base Plane
+    // =========================================================================
+    function buildOcean() {
+      const oceanW = TERRAIN.width * SCALE * 1.55;
+      const oceanH = TERRAIN.height * SCALE * 1.55;
+
+      const oceanGeom = new THREE.PlaneGeometry(oceanW, oceanH);
+      const oceanMat = new THREE.MeshStandardMaterial({
+        color: 0x071b2d,
+        roughness: 0.3,
+        metalness: 0.35
+      });
+
+      oceanMesh = new THREE.Mesh(oceanGeom, oceanMat);
+      oceanMesh.rotation.x = -Math.PI / 2;
+      oceanMesh.position.y = -0.35;
+      scene.add(oceanMesh);
+    }
+
+    // =========================================================================
+    // 4. InstancedMesh for All 773 Peaks (1 Draw Call Optimization!)
+    // =========================================================================
+    const sphereGeometry = new THREE.SphereGeometry(1.6, 10, 10);
+    const defaultPeakMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff2244,
+      emissive: 0x660012,
+      roughness: 0.35
+    });
+
+    function buildPeakInstancedMesh() {
+      // 1 single draw call for all 773 peaks!
+      peakInstancedMesh = new THREE.InstancedMesh(sphereGeometry, defaultPeakMaterial, PEAKS.length);
+      peakInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+      for (let i = 0; i < PEAKS.length; i++) {
+        const peak = PEAKS[i];
+        dummy.position.set(peak.x * SCALE, peak.elev * SCALE * zExaggeration, peak.z * SCALE);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        peakInstancedMesh.setMatrixAt(i, dummy.matrix);
+      }
+      peakInstancedMesh.instanceMatrix.needsUpdate = true;
+      scene.add(peakInstancedMesh);
+
+      // Selected Peak Highlight Marker
+      const highlightGeom = new THREE.SphereGeometry(2.4, 14, 14);
+      const highlightMat = new THREE.MeshStandardMaterial({
+        color: 0xffea00,
+        emissive: 0xffaa00,
+        roughness: 0.2
+      });
+      selectedMarkerMesh = new THREE.Mesh(highlightGeom, highlightMat);
+      selectedMarkerMesh.visible = false;
+      scene.add(selectedMarkerMesh);
+    }
+
+    function buildPeakLabels() {
+      for (let i = 0; i < PEAKS.length; i++) {
+        const peak = PEAKS[i];
+        if (peak.isNamed) {
+          const div = document.createElement('div');
+          div.className = 'peak-label-badge';
+          div.innerHTML = `<span>${peak.name}</span><span class="elev-tag">${Math.round(peak.elev)}m</span>`;
+
+          const labelObj = new THREE.CSS2DObject(div);
+          labelObj.position.set(peak.x * SCALE, (peak.elev * SCALE * zExaggeration) + 1.8, peak.z * SCALE);
+          scene.add(labelObj);
+          peakLabels.push({ obj: labelObj, index: i, div: div });
+        }
+      }
+      updatePeakDisplay();
+    }
+
+    // =========================================================================
+    // 5. Dynamic Filtering & Decluttering
+    // =========================================================================
+    let currentMinElev = 0;
+    let showNamedOnly = false;
+    let showLabels = true;
+
+    function updatePeakDisplay() {
+      let visibleCount = 0;
+
+      for (let i = 0; i < PEAKS.length; i++) {
+        const peak = PEAKS[i];
+        const isVisible = (peak.elev >= currentMinElev) && (!showNamedOnly || peak.isNamed);
+
+        dummy.position.set(peak.x * SCALE, peak.elev * SCALE * zExaggeration, peak.z * SCALE);
+        if (isVisible) {
+          dummy.scale.set(1, 1, 1);
+          visibleCount++;
+        } else {
+          dummy.scale.set(0, 0, 0); // hide via zero scale
+        }
+        dummy.updateMatrix();
+        peakInstancedMesh.setMatrixAt(i, dummy.matrix);
+      }
+      peakInstancedMesh.instanceMatrix.needsUpdate = true;
+
+      updatePeakLabelsVisibility();
+      document.getElementById('visible-count').textContent = visibleCount;
+      requestRender();
+    }
+
+    function updatePeakLabelsVisibility() {
+      const camDist = camera ? camera.position.distanceTo(controls.target) : 550;
+      const isMobile = window.innerWidth < 768;
+      // On mobile or far zoom, only show high prominent peaks to prevent screen clutter
+      const distThreshold = isMobile ? 620 : 540;
+
+      for (let j = 0; j < peakLabels.length; j++) {
+        const item = peakLabels[j];
+        const peak = PEAKS[item.index];
+        const isProminent = (peak.elev >= distThreshold) || (currentMinElev > 0) || (selectedPeakIndex === item.index) || (camDist < 340);
+        const isVisible = showLabels && (peak.elev >= currentMinElev) && isProminent;
+        item.obj.visible = isVisible;
+      }
+    }
+
+    let zExagDebounceTimeout = null;
+    function updateZExaggeration(factor) {
+      zExaggeration = factor;
+      document.getElementById('z-exag-val').textContent = factor.toFixed(1) + '×';
+
+      // Update terrain mesh vertices
+      const pos = terrainMesh.geometry.attributes.position;
+      for (let i = 0; i < elevationGrid.length; i++) {
+        const elevMeters = elevationGrid[i] / 10.0;
+        pos.setZ(i, elevMeters * SCALE * zExaggeration);
+      }
+      pos.needsUpdate = true;
+
+      // Debounce vertex normals computation for high performance
+      clearTimeout(zExagDebounceTimeout);
+      zExagDebounceTimeout = setTimeout(() => {
+        terrainMesh.geometry.computeVertexNormals();
+        requestRender();
+      }, 50);
+
+      // Update peak markers
+      updatePeakDisplay();
+
+      // Update selected peak highlight
+      if (selectedPeakIndex >= 0) {
+        const selPeak = PEAKS[selectedPeakIndex];
+        selectedMarkerMesh.position.y = selPeak.elev * SCALE * zExaggeration;
+      }
+
+      // Update label heights
+      for (let j = 0; j < peakLabels.length; j++) {
+        const item = peakLabels[j];
+        const peak = PEAKS[item.index];
+        item.obj.position.y = (peak.elev * SCALE * zExaggeration) + 1.8;
+      }
+      requestRender();
+    }
+
+    function updateReliefContrast(percent) {
+      reliefContrast = percent / 100.0;
+      document.getElementById('contrast-val').textContent = percent + '%';
+      if (terrainShaderUniforms && terrainShaderUniforms.uReliefContrast) {
+        terrainShaderUniforms.uReliefContrast.value = reliefContrast;
+        requestRender();
+      }
+    }
+
+    // =========================================================================
+    // 6. Camera Presets & Fly-To Controller
+    // =========================================================================
+    function setCameraView(preset, animateCam = true) {
+      let camPos, targetLook;
+
+      if (preset === 'overview') {
+        camPos = new THREE.Vector3(0, 360, 520);
+        targetLook = new THREE.Vector3(0, 0, 40);
+      } else if (preset === 'portlouis') {
+        camPos = new THREE.Vector3(0, 120, -180);
+        targetLook = new THREE.Vector3(0, 15, -70);
+      } else if (preset === 'southwest') {
+        camPos = new THREE.Vector3(-140, 140, 260);
+        targetLook = new THREE.Vector3(-90, 15, 140);
+      } else if (preset === 'topdown') {
+        camPos = new THREE.Vector3(0, 680, 1);
+        targetLook = new THREE.Vector3(0, 0, 0);
+      }
+
+      if (animateCam) {
+        targetCameraPos = camPos;
+        targetLookAt = targetLook;
+        isAnimatingCamera = true;
+      } else {
+        camera.position.copy(camPos);
+        controls.target.copy(targetLook);
+        controls.update();
+      }
+      requestRender();
+    }
+
+    function flyToPeak(index) {
+      const peak = PEAKS[index];
+      const px = peak.x * SCALE;
+      const pz = peak.z * SCALE;
+      const py = peak.elev * SCALE * zExaggeration;
+
+      targetCameraPos = new THREE.Vector3(px - 32, py + 26, pz + 42);
+      targetLookAt = new THREE.Vector3(px, py, pz);
+      isAnimatingCamera = true;
+
+      selectPeak(index);
+      requestRender();
+    }
+
+    // =========================================================================
+    // 7. Raycasting & Peak Selection
+    // =========================================================================
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    let pointerDownPos = { x: 0, y: 0 };
+
+    function onPointerDown(e) {
+      pointerDownPos.x = e.clientX;
+      pointerDownPos.y = e.clientY;
+    }
+
+    function onPointerClick(e) {
+      const dx = e.clientX - pointerDownPos.x;
+      const dy = e.clientY - pointerDownPos.y;
+      if (Math.hypot(dx, dy) > 6) return; // ignore dragging
+
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObject(peakInstancedMesh);
+
+      if (intersects.length > 0) {
+        const instanceId = intersects[0].instanceId;
+        if (instanceId !== undefined && instanceId >= 0) {
+          const peak = PEAKS[instanceId];
+          if ((peak.elev >= currentMinElev) && (!showNamedOnly || peak.isNamed)) {
+            selectPeak(instanceId);
+          }
+        }
+      }
+    }
+
+    function selectPeak(index) {
+      selectedPeakIndex = index;
+      const peak = PEAKS[index];
+
+      // Move highlight sphere over summit
+      selectedMarkerMesh.position.set(
+        peak.x * SCALE,
+        peak.elev * SCALE * zExaggeration,
+        peak.z * SCALE
+      );
+      selectedMarkerMesh.visible = true;
+
+      // Populate Inspector Card
+      document.getElementById('insp-name').textContent = peak.name;
+      document.getElementById('insp-elev').textContent = Math.round(peak.elev) + ' m';
+
+      const knownBox = document.getElementById('insp-known-box');
+      if (peak.known) {
+        knownBox.style.display = 'block';
+        document.getElementById('insp-known').textContent = Math.round(peak.known) + ' m';
+      } else {
+        knownBox.style.display = 'none';
+      }
+
+      const tagEl = document.getElementById('insp-tag');
+      const fclassFormatted = peak.fclass.replace('_', ' ');
+      tagEl.textContent = fclassFormatted || (peak.isNamed ? 'Named Summit' : 'Topographic Summit');
+
+      const urlBtn = document.getElementById('insp-url-btn');
+      if (peak.url) {
+        urlBtn.style.display = 'flex';
+        urlBtn.href = peak.url;
+      } else {
+        urlBtn.style.display = 'none';
+      }
+
+      document.getElementById('insp-fly-btn').onclick = () => flyToPeak(index);
+      document.getElementById('inspector-card').style.display = 'block';
+
+      updatePeakLabelsVisibility();
+      requestRender();
+    }
+
+    function closeInspector() {
+      document.getElementById('inspector-card').style.display = 'none';
+      selectedMarkerMesh.visible = false;
+      selectedPeakIndex = -1;
+      updatePeakLabelsVisibility();
+      requestRender();
+    }
+
+    // =========================================================================
+    // 8. Search Autocomplete
+    // =========================================================================
+    const searchInput = document.getElementById('peak-search');
+    const searchResults = document.getElementById('search-results');
+
+    searchInput.addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      if (!q) {
+        searchResults.style.display = 'none';
+        return;
+      }
+
+      const matches = PEAKS.filter(p => p.isNamed && p.name.toLowerCase().includes(q)).slice(0, 8);
+      if (matches.length === 0) {
+        searchResults.innerHTML = '<div class="search-item" style="color:var(--text-muted);">No matching peaks</div>';
+      } else {
+        searchResults.innerHTML = matches.map(p => `
+          <div class="search-item" onclick="onSearchSelect(${p.id})">
+            <span>${p.name}</span>
+            <span class="item-elev">${Math.round(p.elev)}m</span>
+          </div>
+        `).join('');
+      }
+      searchResults.style.display = 'block';
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.search-container')) {
+        searchResults.style.display = 'none';
+      }
+    });
+
+    function onSearchSelect(id) {
+      searchResults.style.display = 'none';
+      searchInput.value = PEAKS[id].name;
+      flyToPeak(id);
+    }
+
+    // =========================================================================
+    // 9. UI Controls Event Listeners
+    // =========================================================================
+    const elevSlider = document.getElementById('min-elev-slider');
+    elevSlider.addEventListener('input', (e) => {
+      currentMinElev = parseFloat(e.target.value);
+      document.getElementById('min-elev-val').textContent = Math.round(currentMinElev) + ' m';
+      updatePeakDisplay();
+    });
+
+    const zSlider = document.getElementById('z-exag-slider');
+    zSlider.addEventListener('input', (e) => {
+      updateZExaggeration(parseFloat(e.target.value));
+    });
+
+    const contrastSlider = document.getElementById('contrast-slider');
+    contrastSlider.addEventListener('input', (e) => {
+      updateReliefContrast(parseInt(e.target.value, 10));
+    });
+
+    document.getElementById('toggle-named').addEventListener('change', (e) => {
+      showNamedOnly = e.target.checked;
+      updatePeakDisplay();
+    });
+
+    document.getElementById('toggle-labels').addEventListener('change', (e) => {
+      showLabels = e.target.checked;
+      updatePeakDisplay();
+    });
+
+    function applyQuickFilter(type, el) {
+      document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+      if (el) el.classList.add('active');
+
+      if (type === 'all') {
+        currentMinElev = 0;
+        showNamedOnly = false;
+        elevSlider.value = 0;
+        document.getElementById('toggle-named').checked = false;
+      } else if (type === 'named') {
+        currentMinElev = 0;
+        showNamedOnly = true;
+        elevSlider.value = 0;
+        document.getElementById('toggle-named').checked = true;
+      } else if (type === 'high') {
+        currentMinElev = 500;
+        showNamedOnly = false;
+        elevSlider.value = 500;
+        document.getElementById('toggle-named').checked = false;
+      } else if (type === 'top10') {
+        currentMinElev = 700;
+        showNamedOnly = true;
+        elevSlider.value = 700;
+        document.getElementById('toggle-named').checked = true;
+      } else if (type === 'protected') {
+        currentMinElev = 0;
+        showNamedOnly = true;
+        elevSlider.value = 0;
+        document.getElementById('toggle-named').checked = true;
+      }
+
+      document.getElementById('min-elev-val').textContent = Math.round(currentMinElev) + ' m';
+      updatePeakDisplay();
+    }
+
+    function toggleSidebar() {
+      const panel = document.getElementById('controls-panel');
+      const isMobile = window.innerWidth < 768;
+
+      if (isMobile) {
+        panel.classList.toggle('open');
+      } else {
+        panel.classList.toggle('collapsed');
+      }
+      requestRender();
+    }
+
+    // =========================================================================
+    // 10. Keyboard Flight Navigation (matching 3d.py)
+    // =========================================================================
+    function onKeyDown(e) {
+      if (e.target.tagName === 'INPUT') return;
+
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      forward.y = 0;
+      forward.normalize();
+
+      const right = new THREE.Vector3();
+      right.crossVectors(forward, camera.up).normalize();
+      const step = Math.max(camera.position.y * 0.12, 10.0);
+
+      switch (e.key) {
+        case 'ArrowUp':
+        case 'w':
+        case 'W':
+          camera.position.addScaledVector(forward, step);
+          controls.target.addScaledVector(forward, step);
+          requestRender();
+          break;
+        case 'ArrowDown':
+        case 's':
+        case 'S':
+          camera.position.addScaledVector(forward, -step);
+          controls.target.addScaledVector(forward, -step);
+          requestRender();
+          break;
+        case 'ArrowLeft':
+        case 'a':
+        case 'A':
+          camera.position.addScaledVector(right, -step);
+          controls.target.addScaledVector(right, -step);
+          requestRender();
+          break;
+        case 'ArrowRight':
+        case 'd':
+        case 'D':
+          camera.position.addScaledVector(right, step);
+          controls.target.addScaledVector(right, step);
+          requestRender();
+          break;
+        case 'e':
+        case 'E':
+          camera.position.y += step;
+          controls.target.y += step;
+          requestRender();
+          break;
+        case 'q':
+        case 'Q':
+          if (camera.position.y - step > 5.0) {
+            camera.position.y -= step;
+            controls.target.y -= step;
+            requestRender();
+          }
+          break;
+      }
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+
+      const isMobile = window.innerWidth < 768;
+      const maxDPR = isMobile ? 1.5 : 2.0;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDPR));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      labelRenderer.setSize(window.innerWidth, window.innerHeight);
+
+      requestRender();
+    }
+
+    // =========================================================================
+    // 11. High-Performance Render Loop (Render-on-Demand + Smooth Damping)
+    // =========================================================================
+    function animate() {
+      requestAnimationFrame(animate);
+
+      // Camera Fly-To Interpolation
+      if (isAnimatingCamera && targetCameraPos && targetLookAt) {
+        camera.position.lerp(targetCameraPos, 0.085);
+        controls.target.lerp(targetLookAt, 0.085);
+        requestRender();
+
+        if (camera.position.distanceTo(targetCameraPos) < 0.35) {
+          isAnimatingCamera = false;
+          targetCameraPos = null;
+          targetLookAt = null;
+        }
+      }
+
+      // OrbitControls damping updates
+      const controlsChanged = controls.update();
+      if (controlsChanged || isAnimatingCamera || renderRequested) {
+        renderer.render(scene, camera);
+        labelRenderer.render(scene, camera);
+        renderRequested = false;
+      }
+    }
+
+    // Initialize when DOM ready
+    window.addEventListener('DOMContentLoaded', initScene);
+  </script>
+</body>
+</html>
