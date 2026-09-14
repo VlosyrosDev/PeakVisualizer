@@ -742,60 +742,9 @@
   <script src="texture_data.js"></script>
   <script src="data.js"></script>
 
-  <!-- =========================================================================
-       Website Analytics Configuration
-       To enable public visitor tracking when hosting online:
-       1. Google Analytics 4: Set GA_MEASUREMENT_ID to your "G-XXXXXXXXXX"
-       2. GoatCounter (free/privacy-first): Set GOATCOUNTER_CODE to your subdomain
-       3. Cloudflare Web Analytics: Set CLOUDFLARE_BEACON_TOKEN to your token
-       ========================================================================= -->
-  <script>
-    window.ANALYTICS_CONFIG = {
-      GA_MEASUREMENT_ID: "",        // e.g. "G-1234567890"
-      GOATCOUNTER_CODE: "",         // e.g. "mauritius-peaks" (counts on https://mauritius-peaks.goatcounter.com)
-      CLOUDFLARE_BEACON_TOKEN: ""   // e.g. "abcdef123456"
-    };
-
-    // Dynamically load configured analytics provider when online
-    (function initRemoteAnalytics() {
-      if (window.location.protocol === 'file:') return; // skip remote calls on local disk
-
-      // 1. Google Analytics 4
-      if (window.ANALYTICS_CONFIG.GA_MEASUREMENT_ID) {
-        const gaScript = document.createElement('script');
-        gaScript.async = true;
-        gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=' + window.ANALYTICS_CONFIG.GA_MEASUREMENT_ID;
-        document.head.appendChild(gaScript);
-
-        window.dataLayer = window.dataLayer || [];
-        function gtag(){ dataLayer.push(arguments); }
-        window.gtag = gtag;
-        gtag('js', new Date());
-        gtag('config', window.ANALYTICS_CONFIG.GA_MEASUREMENT_ID, {
-          page_title: 'Mauritius 3D Peak Visualizer',
-          anonymize_ip: true
-        });
-      }
-
-      // 2. GoatCounter (free & privacy-friendly)
-      if (window.ANALYTICS_CONFIG.GOATCOUNTER_CODE) {
-        const gcScript = document.createElement('script');
-        gcScript.async = true;
-        gcScript.dataset.goatcounter = 'https://' + window.ANALYTICS_CONFIG.GOATCOUNTER_CODE + '.goatcounter.com/count';
-        gcScript.src = '//gc.zgo.at/count.js';
-        document.head.appendChild(gcScript);
-      }
-
-      // 3. Cloudflare Web Analytics
-      if (window.ANALYTICS_CONFIG.CLOUDFLARE_BEACON_TOKEN) {
-        const cfScript = document.createElement('script');
-        cfScript.defer = true;
-        cfScript.src = 'https://static.cloudflareinsights.com/beacon.min.js';
-        cfScript.dataset.cfBeacon = JSON.stringify({ token: window.ANALYTICS_CONFIG.CLOUDFLARE_BEACON_TOKEN });
-        document.head.appendChild(cfScript);
-      }
-    })();
-  </script>
+  <!-- GoatCounter Analytics (Private to vlosyros dashboard) -->
+  <script data-goatcounter="https://vlosyros.goatcounter.com/count"
+          async src="//gc.zgo.at/count.js"></script>
 </head>
 <body>
 
@@ -909,22 +858,6 @@
       <button class="preset-btn" onclick="setCameraView('portlouis')">🏙️ Port Louis Range</button>
       <button class="preset-btn" onclick="setCameraView('southwest')">⛰️ Black River Gorges</button>
       <button class="preset-btn" onclick="setCameraView('topdown')">🗺️ Top-Down Map</button>
-    </div>
-
-    <!-- Website Analytics Card -->
-    <div class="section-title">Site Analytics & Traffic</div>
-    <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px;font-size:12px;margin-bottom:6px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <span style="color:var(--text-muted);">Visitor Sessions</span>
-        <span style="color:var(--accent-green);font-weight:700;font-size:15px;" id="analytics-visit-count">1</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <span style="color:var(--text-muted);">Peaks Explored</span>
-        <span style="color:var(--accent-blue);font-weight:700;" id="analytics-inspect-count">0</span>
-      </div>
-      <div style="font-size:11px;color:var(--text-muted);border-top:1px solid rgba(255,255,255,0.06);padding-top:8px;margin-top:6px;line-height:1.4;">
-        <span style="color:#2ecc71;">●</span> Analytics active. Connect GA4 or GoatCounter in <code style="background:rgba(255,255,255,0.1);padding:1px 4px;border-radius:3px;">index.html</code>.
-      </div>
     </div>
 
     <!-- Desktop Controls Legend -->
@@ -1231,12 +1164,15 @@
     // =========================================================================
     // 4. InstancedMesh for All 773 Peaks (1 Draw Call Optimization!)
     // =========================================================================
-    const sphereGeometry = new THREE.SphereGeometry(1.6, 10, 10);
+    // Reduced sphere radius from 1.6 to 0.85 for crisp pinpoint accuracy
+    const sphereGeometry = new THREE.SphereGeometry(0.85, 10, 10);
     const defaultPeakMaterial = new THREE.MeshStandardMaterial({
       color: 0xff2244,
       emissive: 0x660012,
       roughness: 0.35
     });
+
+    let markerScale = 1.0;
 
     function buildPeakInstancedMesh() {
       // 1 single draw call for all 773 peaks!
@@ -1246,7 +1182,7 @@
       for (let i = 0; i < PEAKS.length; i++) {
         const peak = PEAKS[i];
         dummy.position.set(peak.x * SCALE, peak.elev * SCALE * zExaggeration, peak.z * SCALE);
-        dummy.scale.set(1, 1, 1);
+        dummy.scale.set(markerScale, markerScale, markerScale);
         dummy.updateMatrix();
         peakInstancedMesh.setMatrixAt(i, dummy.matrix);
       }
@@ -1254,7 +1190,7 @@
       scene.add(peakInstancedMesh);
 
       // Selected Peak Highlight Marker
-      const highlightGeom = new THREE.SphereGeometry(2.4, 14, 14);
+      const highlightGeom = new THREE.SphereGeometry(1.35, 14, 14);
       const highlightMat = new THREE.MeshStandardMaterial({
         color: 0xffea00,
         emissive: 0xffaa00,
@@ -1298,7 +1234,7 @@
 
         dummy.position.set(peak.x * SCALE, peak.elev * SCALE * zExaggeration, peak.z * SCALE);
         if (isVisible) {
-          dummy.scale.set(1, 1, 1);
+          dummy.scale.set(markerScale, markerScale, markerScale);
           visibleCount++;
         } else {
           dummy.scale.set(0, 0, 0); // hide via zero scale
@@ -1494,6 +1430,9 @@
       document.getElementById('insp-fly-btn').onclick = () => flyToPeak(index);
       document.getElementById('inspector-card').style.display = 'block';
 
+      recordPeakInspection();
+      trackAnalyticsEvent('inspect_peak', { peak_name: peak.name, elevation: peak.elev, fclass: peak.fclass });
+
       updatePeakLabelsVisibility();
       requestRender();
     }
@@ -1542,6 +1481,7 @@
     function onSearchSelect(id) {
       searchResults.style.display = 'none';
       searchInput.value = PEAKS[id].name;
+      trackAnalyticsEvent('search_peak', { query: PEAKS[id].name });
       flyToPeak(id);
     }
 
@@ -1565,14 +1505,23 @@
       updateReliefContrast(parseInt(e.target.value, 10));
     });
 
+    const markerSlider = document.getElementById('marker-size-slider');
+    markerSlider.addEventListener('input', (e) => {
+      markerScale = parseFloat(e.target.value) / 100.0;
+      document.getElementById('marker-size-val').textContent = e.target.value + '%';
+      updatePeakDisplay();
+    });
+
     document.getElementById('toggle-named').addEventListener('change', (e) => {
       showNamedOnly = e.target.checked;
       updatePeakDisplay();
+      trackAnalyticsEvent('toggle_named', { enabled: showNamedOnly });
     });
 
     document.getElementById('toggle-labels').addEventListener('change', (e) => {
       showLabels = e.target.checked;
       updatePeakDisplay();
+      trackAnalyticsEvent('toggle_labels', { enabled: showLabels });
     });
 
     function applyQuickFilter(type, el) {
@@ -1721,6 +1670,70 @@
         renderer.render(scene, camera);
         labelRenderer.render(scene, camera);
         renderRequested = false;
+      }
+    }
+
+    // =========================================================================
+    // 12. Local & Remote Analytics Tracking System
+    // =========================================================================
+    function initAnalytics() {
+      try {
+        let visits = parseInt(localStorage.getItem('mru_peaks_visits') || '0', 10);
+        // Track new visit session
+        if (!sessionStorage.getItem('mru_session_active')) {
+          visits += 1;
+          localStorage.setItem('mru_peaks_visits', visits);
+          sessionStorage.setItem('mru_session_active', '1');
+          trackAnalyticsEvent('session_start', { visit_number: visits });
+        }
+        const visitEl = document.getElementById('analytics-visit-count');
+        if (visitEl) visitEl.textContent = visits.toLocaleString();
+        // Silent GoatCounter session event (no UI elements added)
+        try {
+          // Only record once per browser session to avoid double-counting
+          if (window.goatcounter && typeof window.goatcounter.count === 'function' && !sessionStorage.getItem('goatcounter_session_recorded')) {
+            sessionStorage.setItem('goatcounter_session_recorded', '1');
+            // Send a silent custom event to GoatCounter. This records that a user/session accessed
+            // the site without adding any visible UI to the page.
+            window.goatcounter.count({
+              path: '/session',
+              title: 'session',
+              event: true
+            });
+          }
+        } catch (e) {
+          // swallow any GoatCounter errors to avoid breaking the page
+        }
+
+        let inspected = parseInt(localStorage.getItem('mru_peaks_inspected') || '0', 10);
+        const inspEl = document.getElementById('analytics-inspect-count');
+        if (inspEl) inspEl.textContent = inspected.toLocaleString();
+      } catch (err) {
+        // LocalStorage fallback for restrictive environments
+      }
+    }
+
+    function recordPeakInspection() {
+      try {
+        let count = parseInt(localStorage.getItem('mru_peaks_inspected') || '0', 10) + 1;
+        localStorage.setItem('mru_peaks_inspected', count);
+        const inspEl = document.getElementById('analytics-inspect-count');
+        if (inspEl) inspEl.textContent = count.toLocaleString();
+      } catch (err) {}
+    }
+
+    function trackAnalyticsEvent(eventName, params = {}) {
+      // 1. Google Analytics 4
+      if (typeof window.gtag === 'function') {
+        window.gtag('event', eventName, params);
+      }
+      // 2. GoatCounter (free/privacy-friendly)
+      if (window.goatcounter && typeof window.goatcounter.count === 'function') {
+        window.goatcounter.count({
+          path: '/' + eventName,
+          title: params.peak_name || params.query || eventName,
+          event: true
+        });
       }
     }
 
