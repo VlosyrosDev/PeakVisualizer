@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapman Hill</title>
+
+    <!-- Google Fonts: Noto Serif -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,300;0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Pannellum 360 Library CSS & JS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css"/>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
+
+    <!-- Font Awesome Icons for custom controls -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Leaflet-GPX Plugin -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-gpx/1.7.0/gpx.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkbg: '#111111',
+                        darkcard: '#161616',
+                        darkborder: '#262626',
+                        gold: {
+                            DEFAULT: '#a17f48',
+                            light: '#bfa168',
+                            dark: '#7e6133',
+                            glow: 'rgba(161, 127, 72, 0.15)',
+                        }
+                    },
+                    fontFamily: {
+                        serif: ['"Noto Serif"', 'serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        :root {
+            --bg-dark: #111111;
+            --gold-primary: #a17f48;
+            --gold-light: #bfa168;
+        }
+
+        html { 
+            scroll-behavior: smooth; 
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: #d1d1d1;
+            font-family: 'Noto Serif', serif;
+            background-image: radial-gradient(circle at 50% 0%, rgba(161, 127, 72, 0.05) 0%, transparent 70%);
+            background-attachment: fixed;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Project Card Styling */
+        .project-card {
+            position: relative;
+            background-color: #161616;
+            border: 1px solid #262626;
+            touch-action: manipulation;
+            transition: transform 0.2s ease,
+                        border-color 0.2s ease,
+                        box-shadow 0.2s ease,
+                        background-color 0.2s ease;
+        }
+
+        .project-card:hover {
+            border-color: rgba(161, 127, 72, 0.5);
+            box-shadow: 0 10px 30px -10px rgba(161, 127, 72, 0.15);
+        }
+
+        /* ---------------------------------------------------------------
+           Pannellum UI Theme Overrides (Matching Dark Gold Theme)
+        ---------------------------------------------------------------- */
+        .pnm-container {
+            background-color: #111111 !important;
+            font-family: 'Noto Serif', serif !important;
+        }
+
+        /* Customizing native Pannellum controls to fit dark/gold theme */
+        .pnm-controls-container {
+            background: rgba(22, 22, 22, 0.85) !important;
+            border: 1px solid #262626 !important;
+            border-radius: 8px !important;
+            backdrop-filter: blur(8px);
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .pnm-control {
+            background-color: #161616 !important;
+            border-color: #262626 !important;
+            color: #a17f48 !important;
+            transition: all 0.2s ease !important;
+        }
+
+        .pnm-control:hover {
+            background-color: #262626 !important;
+            color: #bfa168 !important;
+        }
+
+        .pnm-load-button {
+            background-color: rgba(22, 22, 22, 0.9) !important;
+            border: 1px solid #a17f48 !important;
+            color: #bfa168 !important;
+            font-family: 'Noto Serif', serif !important;
+            border-radius: 6px !important;
+            box-shadow: 0 0 15px rgba(161, 127, 72, 0.2) !important;
+            transition: all 0.3s ease !important;
+        }
+
+        .pnm-load-button:hover {
+            background-color: #a17f48 !important;
+            color: #111111 !important;
+            box-shadow: 0 0 25px rgba(161, 127, 72, 0.5) !important;
+        }
+
+        /* Custom Hotspot Pulsing Style */
+        .custom-hotspot {
+            height: 24px;
+            width: 24px;
+            background: rgba(161, 127, 72, 0.8);
+            border: 2px solid #bfa168;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(161, 127, 72, 0.8);
+            animation: pulse-gold 2s infinite;
+        }
+
+        @keyframes pulse-gold {
+            0% {
+                box-shadow: 0 0 0 0 rgba(161, 127, 72, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 14px rgba(161, 127, 72, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(161, 127, 72, 0);
+            }
+        }
+
+        /* Styling the Leaflet attribution box to match dark/gold theme */
+        .leaflet-container .leaflet-control-attribution {
+          background: rgba(22, 22, 22, 0.8) !important;
+          color: #888888 !important;
+          font-size: 10px !important;
+          border-radius: 4px;
+          padding: 2px 6px;
+          border: 1px solid #262626;
+        }
+
+        .leaflet-container .leaflet-control-attribution a {
+          color: #a17f48 !important; /* Matches your gold theme */
+          text-decoration: none;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-4 sm:p-6 md:p-8">
+
+    <!-- Header Section -->
+    <header class="max-w-6xl w-full mx-auto mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-darkborder pb-4">
+        <div>
+            <h1 class="text-2xl sm:text-3xl font-bold text-white tracking-wide">Chapman Hill</h1>
+        </div>
+    </header>
+
+    <!-- Main Viewer Card Section -->
+    <main class="max-w-6xl w-full mx-auto my-auto">
+        <div class="project-card rounded-xl overflow-hidden shadow-2xl">
+            
+            <!-- Top Card Decorative Accent -->
+            <div class="h-1 w-full bg-gradient-to-r from-transparent via-gold to-transparent opacity-70"></div>
+
+            <!-- Card Header Controls Overlay bar -->
+            <div class="p-4 bg-darkcard border-b border-darkborder flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-darkbg border border-darkborder flex items-center justify-center text-gold">
+                        <i class="fa-solid fa-compass text-sm"></i>
+                    </div>
+                    <div>
+                        <h2 id="viewer-title" class="text-sm font-semibold text-white">Chapman Panorama</h2>
+                        <p class="text-xs text-gray-400">Drag to look around • Scroll/Pinch to zoom</p>
+                    </div>
+                </div>
+
+                <!-- Custom Interactive Control Bar -->
+                <div class="flex items-center gap-1.5 bg-darkbg border border-darkborder p-1 rounded-lg">
+                    <button id="btn-autorotate" onclick="toggleAutoRotate()" class="p-2 text-gray-300 hover:text-gold hover:bg-darkcard rounded-md transition duration-150 text-xs flex items-center gap-1.5" title="Toggle Auto Rotate">
+                        <i id="icon-autorotate" class="fa-solid fa-pause text-gold"></i>
+                        <span class="hidden sm:inline">Auto-Spin</span>
+                    </button>
+                    <div class="h-4 w-[1px] bg-darkborder"></div>
+                    <button onclick="resetView()" class="p-2 text-gray-300 hover:text-gold hover:bg-darkcard rounded-md transition duration-150 text-xs flex items-center gap-1.5" title="Reset Camera View">
+                        <i class="fa-solid fa-arrow-rotate-left"></i>
+                        <span class="hidden sm:inline">Reset</span>
+                    </button>
+                    <div class="h-4 w-[1px] bg-darkborder"></div>
+                    <button onclick="zoomIn()" class="p-2 text-gray-300 hover:text-gold hover:bg-darkcard rounded-md transition duration-150 text-xs" title="Zoom In">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
+                    <button onclick="zoomOut()" class="p-2 text-gray-300 hover:text-gold hover:bg-darkcard rounded-md transition duration-150 text-xs" title="Zoom Out">
+                        <i class="fa-solid fa-minus"></i>
+                    </button>
+                    <div class="h-4 w-[1px] bg-darkborder"></div>
+                    <button onclick="toggleFullscreen()" class="p-2 text-gray-300 hover:text-gold hover:bg-darkcard rounded-md transition duration-150 text-xs" title="Toggle Fullscreen">
+                        <i class="fa-solid fa-expand"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 360 Panorama Canvas Div -->
+            <div class="relative w-full h-[450px] sm:h-[550px] md:h-[620px] bg-darkbg">
+                <div id="panorama" class="w-full h-full"></div>
+            </div>
+
+            <!-- Trail Map Card -->
+            <div class="project-card rounded-xl p-4 my-6">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="font-serif text-lg text-white">Trail Overview</h2>
+                            <span id="gpx-distance" class="text-xs text-stone-400">Loading trail...</span>
+                </div>
+                <!-- Map Element -->
+                <div id="trail-map" class="w-full h-80 rounded-lg overflow-hidden border border-[#262626]"></div>
+                        <div class="mt-3 flex justify-end">
+                            <button id="btn-download-gpx" onclick="downloadGpx()" class="text-xs px-2 py-1 rounded bg-darkbg border border-darkborder hover:bg-gold/10 text-gold hover:text-white transition" title="Download GPX">
+                                <i class="fa-solid fa-download mr-1"></i>Download GPX
+                            </button>
+                        </div>
+            </div>
+
+            <!-- Card Footer details -->
+            <div class="p-4 bg-darkcard border-t border-darkborder flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-400">
+                <div class="text-gray-500">
+                    Use mouse drag or mobile touch gestures to explore
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // Store Pannellum viewer instance
+        let viewer = null;
+        // Reflects whether the viewer is currently auto-rotating (kept in sync by a watcher)
+        let isAutoRotating = false;
+        const AUTO_ROTATE_POLL_MS = 500; // how often to check actual autorotate state
+        let _autoRotatePollId = null;
+
+        // Primary user image path & reliable public fallback URL
+        const PRIMARY_IMAGE = "chapman360.webp";
+        const DEMO_FALLBACK_IMAGE = "https://pannellum.org/images/alma.jpg";
+
+        /**
+         * Initialize Pannellum 360 Viewer
+         */
+        function initPanorama(imagePath) {
+            // Destroy existing viewer if changing sources
+            if (viewer) {
+                try {
+                    viewer.destroy();
+                } catch (e) {
+                    console.log("Reinitializing viewer...");
+                }
+            }
+
+            // Create Pannellum viewer with custom settings
+            viewer = pannellum.viewer('panorama', {
+                "type": "equirectangular",
+                "panorama": imagePath,
+                "autoLoad": true,
+                "autoRotate": -2, // Smooth counter-clockwise auto rotate
+                "compass": false,
+                "showZoomCtrl": false, // Handled via our custom dark UI toolbar
+                "showFullscreenCtrl": false,
+                "mouseZoom": true,
+                "hfov": 100, // Field of view
+                "minHfov": 50,
+                "maxHfov": 120,
+                "pitch": 0,
+                "yaw": -73,
+                "crossOrigin": "anonymous"
+            });
+
+            // Handle image load error fallback automatically if local file isn't found
+            viewer.on('error', function(errorMsg) {
+                console.warn("Primary image not found or failed to load. Falling back to Demo 360 image.", errorMsg);
+                if (imagePath === PRIMARY_IMAGE) {
+                    switchImageSource('demo');
+                    showToast("Loaded demo 360 image (chapman360.webp not found locally)");
+                }
+            });
+            // Update button state after init and start a watcher to detect external changes
+            updateAutoRotateButtonState();
+            if (_autoRotatePollId) clearInterval(_autoRotatePollId);
+            _autoRotatePollId = setInterval(updateAutoRotateButtonState, AUTO_ROTATE_POLL_MS);
+        }
+
+        /**
+         * Toggle Auto Rotation (Play / Pause)
+         */
+        function toggleAutoRotate() {
+            if (!viewer) return;
+            // Toggle via API and immediately update UI; watcher will keep it in sync
+            if (isAutoRotating) {
+                viewer.stopAutoRotate();
+            } else {
+                viewer.startAutoRotate(-2);
+            }
+            // reflect change promptly
+            updateAutoRotateButtonState();
+        }
+
+        /**
+         * Reset Pitch and Yaw Camera View
+         */
+        function resetView() {
+            if (!viewer) return;
+            viewer.setPitch(0);
+            viewer.setYaw(-73);
+            viewer.setHfov(100);
+        }
+
+        /**
+         * Custom Zoom Controls
+         */
+        function zoomIn() {
+            if (!viewer) return;
+            const currentHfov = viewer.getHfov();
+            viewer.setHfov(Math.max(currentHfov - 15, 50));
+        }
+
+        function zoomOut() {
+            if (!viewer) return;
+            const currentHfov = viewer.getHfov();
+            viewer.setHfov(Math.min(currentHfov + 15, 120));
+        }
+
+        /**
+         * Toggle Fullscreen
+         */
+        function toggleFullscreen() {
+            if (!viewer) return;
+            viewer.toggleFullscreen();
+        }
+
+        /**
+         * Switch between local chapman360.webp and public demo image
+         */
+        function switchImageSource(sourceKey) {
+            const btnPrimary = document.getElementById('btn-src-primary');
+            const btnDemo = document.getElementById('btn-src-demo');
+            const titleElem = document.getElementById('viewer-title');
+
+            if (sourceKey === 'chapman360.webp') {
+                btnPrimary.className = "px-2.5 py-1 rounded bg-gold/20 text-gold font-medium border border-gold/30";
+                btnDemo.className = "px-2.5 py-1 rounded bg-darkbg text-gray-400 border border-darkborder hover:text-white";
+                titleElem.innerText = "Chapman 360 Panorama";
+                initPanorama(PRIMARY_IMAGE);
+            } else {
+                btnDemo.className = "px-2.5 py-1 rounded bg-gold/20 text-gold font-medium border border-gold/30";
+                btnPrimary.className = "px-2.5 py-1 rounded bg-darkbg text-gray-400 border border-darkborder hover:text-white";
+                titleElem.innerText = "360° Demo Panorama";
+                initPanorama(DEMO_FALLBACK_IMAGE);
+            }
+        }
+
+        /**
+         * Helper Toast Notice
+         */
+        function showToast(message) {
+            const toast = document.createElement('div');
+            toast.className = "fixed top-5 right-5 bg-darkcard text-gold border border-gold/40 px-4 py-2.5 rounded-lg text-xs shadow-2xl z-50 transition-opacity duration-300 opacity-100 flex items-center gap-2";
+            toast.innerHTML = `<i class="fa-solid fa-circle-info"></i> ${message}`;
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        // Initialize on DOM load
+        window.onload = function() {
+            initPanorama(PRIMARY_IMAGE);
+        };
+
+        /**
+         * Try to determine whether the pannellum viewer is actually auto-rotating.
+         * Pannellum's public API isn't consistent across versions, so check multiple
+         * possible properties/methods and fall back to config where useful.
+         */
+        function isViewerActuallyAutoRotating() {
+            if (!viewer) return false;
+            try {
+                // Preferred: a direct boolean/function if available
+                if (typeof viewer.isAutoRotating === 'function') return !!viewer.isAutoRotating();
+
+                // Check the config value (autoRotate can be boolean or number)
+                if (typeof viewer.getConfig === 'function') {
+                    const cfg = viewer.getConfig() || {};
+                    if (cfg.autoRotate) return cfg.autoRotate !== 0;
+                }
+
+                // Some internal properties used in different builds
+                if (viewer._autoRotate !== undefined) return !!viewer._autoRotate;
+                if (viewer._autorotate !== undefined) return !!viewer._autorotate;
+                if (viewer._isAutoRotating !== undefined) return !!viewer._isAutoRotating;
+            } catch (e) {
+                // ignore and fall through to false
+            }
+            return false;
+        }
+
+        // Update the Auto-Spin button visuals to match the actual spin state
+        function updateAutoRotateButtonState() {
+            const btnIcon = document.getElementById('icon-autorotate');
+            const btn = document.getElementById('btn-autorotate');
+            const spinning = isViewerActuallyAutoRotating();
+            isAutoRotating = spinning;
+            if (!btnIcon || !btn) return;
+            if (spinning) {
+                btnIcon.className = "fa-solid fa-pause text-gold";
+                btn.setAttribute('aria-pressed', 'true');
+            } else {
+                btnIcon.className = "fa-solid fa-play text-gray-400";
+                btn.setAttribute('aria-pressed', 'false');
+            }
+        }
+
+        // Clean up the poll if the window unloads
+        window.addEventListener('beforeunload', () => {
+            if (_autoRotatePollId) clearInterval(_autoRotatePollId);
+        });
+
+        /* ------------------ Leaflet GPX Map Initialization ------------------ */
+        function initTrailMap() {
+            // Ensure Leaflet is available
+            if (typeof L === 'undefined') {
+                console.warn('Leaflet not loaded');
+                document.getElementById('gpx-distance').textContent = 'Map unavailable';
+                return;
+            }
+
+            const map = L.map('trail-map', { zoomControl: false }).setView([0, 0], 2);
+
+            // ESRI World Imagery (satellite)
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+            }).addTo(map);
+
+                // GPX file path (place `chapmanhill.gpx` next to this HTML)
+                const GPX_URL = 'chapmanhill.gpx';
+
+            const gpx = new L.GPX(GPX_URL, {
+                async: true,
+                marker_options: {
+                    startIconUrl: 'https://cdn.jsdelivr.net/npm/leaflet-gpx@1.7.0/pin-icon-start.png',
+                    endIconUrl: 'https://cdn.jsdelivr.net/npm/leaflet-gpx@1.7.0/pin-icon-end.png',
+                    shadowUrl: 'https://cdn.jsdelivr.net/npm/leaflet-gpx@1.7.0/pin-shadow.png'
+                },
+                polyline_options: {
+                    color: getComputedStyle(document.documentElement).getPropertyValue('--gold-primary') || '#a17f48',
+                    weight: 4,
+                    opacity: 0.95,
+                    lineCap: 'round'
+                }
+            }).on('loaded', function(e) {
+                const track = e.target;
+                try {
+                    map.fitBounds(track.getBounds(), { padding: [20, 20] });
+                } catch (err) {
+                    console.warn('Failed to fit GPX bounds', err);
+                }
+
+                const distMeters = (typeof track.get_distance === 'function') ? track.get_distance() : (track.get_distance && track.get_distance());
+                const distanceKm = distMeters ? (distMeters / 1000).toFixed(2) : null;
+                const elevGain = (typeof track.get_elevation_gain === 'function') ? track.get_elevation_gain() : (track.get_elevation_gain && track.get_elevation_gain());
+                const distanceText = distanceKm ? `${distanceKm} km${elevGain ? ` | +${Math.round(elevGain)}m elev` : ''}` : 'Trail loaded';
+                const el = document.getElementById('gpx-distance');
+                if (el) el.textContent = distanceText;
+            }).on('error', function(err) {
+                console.warn('Failed to load GPX', err);
+                const el = document.getElementById('gpx-distance');
+                if (el) el.textContent = 'Failed to load GPX';
+            }).addTo(map);
+            // expose GPX url globally so download function can reuse it
+            window.__CHAPMAN_GPX_URL = GPX_URL;
+        }
+
+        // Initialize map alongside panorama
+        (function() {
+            // If DOM already loaded, init immediately; otherwise run after load
+            if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                setTimeout(initTrailMap, 50);
+            } else {
+                window.addEventListener('DOMContentLoaded', initTrailMap);
+            }
+        })();
+
+        // Download GPX helper
+        async function downloadGpx() {
+            const url = window.__CHAPMAN_GPX_URL || 'chapmanhill.gpx';
+            try {
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error('Network response was not ok');
+                const blob = await resp.blob();
+                const a = document.createElement('a');
+                const fileName = url.split('/').pop() || 'track.gpx';
+                a.href = URL.createObjectURL(blob);
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+            } catch (err) {
+                console.warn('GPX download failed', err);
+                showToast('GPX download failed');
+            }
+        }
+    </script>
+</body>
+</html>
