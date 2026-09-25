@@ -174,57 +174,7 @@
           text-decoration: none;
         }
 
-       /* --- CUSTOM DARK/GOLD COMPASS OVERRIDE --- */
-
-/* Target Pannellum compass container */
-.pnm-compass,
-div.pnm-compass {
-  /* Dimensions & Glass Card Container */
-  width: 44px !important;
-  height: 44px !important;
-  right: 14px !important;
-  bottom: 14px !important;
-  border-radius: 50% !important;
-  background-color: #161616 !important;
-  border: 1px solid #262626 !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6) !important;
-  
-  /* Replace default PNG sprite with custom Gold SVG Needle */
-  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><polygon points="16,3 22,28 16,22 10,28" fill="%23a17f48" stroke="%23bfa168" stroke-width="1.5"/><polygon points="16,3 16,22 10,28" fill="%237e6133"/></svg>') !important;
-  background-repeat: no-repeat !important;
-  background-position: center !important;
-  background-size: 26px 26px !important;
-  
-  /* Reset default CSS filters */
-  filter: none !important;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
-}
-
-/* Hover state */
-.pnm-compass:hover,
-div.pnm-compass:hover {
-  border-color: #a17f48 !important;
-  box-shadow: 0 0 12px rgba(161, 127, 72, 0.35) !important;
-  transform: scale(1.08) !important;
-}
-
-/* Mobile sizing */
-@media (max-width: 640px) {
-  .pnm-compass,
-  div.pnm-compass {
-    width: 36px !important;
-    height: 36px !important;
-    right: 10px !important;
-    bottom: 10px !important;
-    background-size: 20px 20px !important;
-  }
-}
-                /* Disable CSS transition on SVG needle so JS controls rotation smoothly */
-                #compass-needle {
-                        transition: none !important;
-                        transform-origin: 50% 50% !important;
-                        will-change: transform;
-                }
+                                /* Compass removed */
     </style>
 </head>
 <body class="min-h-screen flex flex-col justify-between p-4 sm:p-6 md:p-8">
@@ -283,14 +233,7 @@ div.pnm-compass:hover {
             <!-- 360 Panorama Canvas Div -->
             <div class="relative w-full h-[450px] sm:h-[550px] md:h-[620px] bg-darkbg">
                 <div id="panorama" class="w-full h-full"></div>
-                                <!-- Custom Dark/Gold Compass Widget -->
-                                <div id="custom-compass" class="absolute bottom-4 right-4 z-10 w-12 h-12 rounded-full bg-[#161616]/90 border border-[#262626] shadow-lg flex items-center justify-center cursor-pointer transition-colors hover:border-[#a17f48]">
-                                    <svg id="compass-needle" class="w-7 h-7 transition-transform duration-75" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <polygon points="16,3 22,16 16,13 10,16" fill="#a17f48" stroke="#bfa168" stroke-width="0.5"/>
-                                        <polygon points="16,29 22,16 16,13 10,16" fill="#7e6133" stroke="#262626" stroke-width="0.5"/>
-                                        <circle cx="16" cy="13" r="1.5" fill="#d1d1d1"/>
-                                    </svg>
-                                </div>
+                
             </div>
 
             <!-- Trail Map Card -->
@@ -374,12 +317,7 @@ div.pnm-compass:hover {
             updateAutoRotateButtonState();
             if (_autoRotatePollId) clearInterval(_autoRotatePollId);
             _autoRotatePollId = setInterval(updateAutoRotateButtonState, AUTO_ROTATE_POLL_MS);
-            // Start syncing our custom compass (if present)
-            startCompassLoop();
-            try {
-                viewer.on && viewer.on('animatefinished', updateCompass);
-                viewer.on && viewer.on('load', updateCompass);
-            } catch (e) {}
+            // Compass removed; no compass sync required
         }
 
         /**
@@ -563,7 +501,22 @@ div.pnm-compass:hover {
                 const distMeters = (typeof track.get_distance === 'function') ? track.get_distance() : (track.get_distance && track.get_distance());
                 const distanceKm = distMeters ? (distMeters / 1000).toFixed(2) : null;
                 const elevGain = (typeof track.get_elevation_gain === 'function') ? track.get_elevation_gain() : (track.get_elevation_gain && track.get_elevation_gain());
-                const distanceText = distanceKm ? `${distanceKm} km${elevGain ? ` | +${Math.round(elevGain)}m elev` : ''}` : 'Trail loaded';
+
+                // Estimated time using a simple Naismith-style rule:
+                //  - flat pace: 5 km/h
+                //  - ascent penalty: +1 hour per 600 m ascent
+                let timeText = '';
+                if (distanceKm) {
+                    const dist = parseFloat(distanceKm);
+                    let timeHours = dist / 5; // hours for horizontal distance
+                    if (elevGain) timeHours += elevGain / 600; // add hours for ascent
+                    const totalMinutes = Math.max(0, Math.round(timeHours * 60));
+                    const hrs = Math.floor(totalMinutes / 60);
+                    const mins = totalMinutes % 60;
+                    timeText = ` | est ${hrs > 0 ? hrs + 'h ' : ''}${mins}m`;
+                }
+
+                const distanceText = distanceKm ? `${distanceKm} km${elevGain ? ` | +${Math.round(elevGain)}m elev` : ''}${timeText}` : 'Trail loaded';
                 const el = document.getElementById('gpx-distance');
                 if (el) el.textContent = distanceText;
             }).on('error', function(err) {
@@ -606,66 +559,7 @@ div.pnm-compass:hover {
             }
         }
 
-        // --- Custom Compass sync ---
-        function updateCompass() {
-            try {
-                if (!viewer) return;
-                const needle = document.getElementById('compass-needle');
-                if (!needle) return;
-                const rawYaw = (typeof viewer.getYaw === 'function') ? viewer.getYaw() : 0;
-                // We want the needle to point to north; invert yaw
-                let target = -rawYaw;
-
-                // Normalize to [-180,180)
-                function normalize(a) {
-                    a = ((a + 180) % 360 + 360) % 360 - 180;
-                    return a;
-                }
-
-                target = normalize(target);
-                let displayed = normalize(__compassDisplayedAngle);
-
-                // Compute shortest delta
-                let delta = target - displayed;
-                if (delta > 180) delta -= 360;
-                if (delta < -180) delta += 360;
-
-                // Apply smoothing (clamp by smoothing factor)
-                displayed = displayed + delta * Math.max(0, Math.min(1, __compassSmoothing));
-                __compassDisplayedAngle = displayed;
-
-                needle.style.transform = `rotate(${displayed}deg)`;
-            } catch (e) {
-                // ignore
-            }
-        }
-
-        let __compassLoop = false;
-        function startCompassLoop() {
-            __compassLoop = true;
-            function loop() {
-                if (!__compassLoop) return;
-                updateCompass();
-                requestAnimationFrame(loop);
-            }
-            requestAnimationFrame(loop);
-        }
-
-        // smoothing state for compass to avoid jitter and wrap-around
-        let __compassDisplayedAngle = 0; // degrees
-        const __compassSmoothing = 0.15; // 0..1 where 1 is no smoothing
-
-        function stopCompassLoop() {
-            __compassLoop = false;
-        }
-
-        // Click compass to reset viewpoint to north
-        document.addEventListener('click', function (e) {
-            const el = e.target.closest && e.target.closest('#custom-compass');
-            if (el && viewer && typeof viewer.setYaw === 'function') {
-                viewer.setYaw(0);
-            }
-        });
+        // Compass widget removed; related JS cleaned up
     </script>
     <script data-goatcounter="https://chapman.goatcounter.com/count"
         async src="//gc.zgo.at/count.js"></script>
