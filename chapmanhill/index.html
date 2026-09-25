@@ -513,7 +513,7 @@
                     const totalMinutes = Math.max(0, Math.round(timeHours * 60));
                     const hrs = Math.floor(totalMinutes / 60);
                     const mins = totalMinutes % 60;
-                    timeText = ` | est ${hrs > 0 ? hrs + 'h ' : ''}${mins}m`;
+                    timeText = ` | est ${hrs > 0 ? hrs + 'h ' : ''}${mins}min`;
                 }
 
                 const distanceText = distanceKm ? `${distanceKm} km${elevGain ? ` | +${Math.round(elevGain)}m elev` : ''}${timeText}` : 'Trail loaded';
