@@ -597,6 +597,17 @@
       font-weight: 600;
     }
 
+    .peak-label-badge.selected {
+      background: rgba(8, 16, 32, 0.96);
+      border-color: #ffea00;
+      box-shadow: 0 0 14px rgba(255, 234, 0, 0.6), 0 4px 16px rgba(0, 0, 0, 0.85);
+      z-index: 100;
+    }
+
+    .peak-label-badge.selected .elev-tag {
+      color: #ffea00;
+    }
+
     /* Loading Overlay */
     #loading-overlay {
       position: absolute;
@@ -1363,6 +1374,7 @@
 
       labelVisibilityDirty = true;
       document.getElementById('visible-count').textContent = visibleCount;
+      updatePeakLabelsVisibility();
       requestRender();
     }
 
@@ -1389,14 +1401,25 @@
 
       for (let j = 0; j < peakLabels.length; j++) {
         const item = peakLabels[j];
+        const isSelected = (selectedPeakIndex === item.index);
+
+        // When a peak is selected, hide all other peak name badges
+        if (selectedPeakIndex >= 0 && !isSelected) {
+          item.obj.visible = false;
+          item.div.classList.remove('selected');
+          continue;
+        }
+
+        item.div.classList.toggle('selected', isSelected);
+
         const peak = PEAKS[item.index];
         const px = item.wx;
         const pz = item.wz;
         const py = peak.elev * SCALE * zExaggeration;
 
-        // 1. Elevation and prominence check
-        const isProminent = (peak.elev >= distThreshold) || (currentMinElev > 0) || (selectedPeakIndex === item.index) || (camDist < 340);
-        if (peak.elev < currentMinElev || !isProminent) {
+        // 1. Elevation and prominence check (selected peak bypasses this check)
+        const isProminent = (peak.elev >= distThreshold) || (currentMinElev > 0) || isSelected || (camDist < 340);
+        if (!isSelected && (peak.elev < currentMinElev || !isProminent)) {
           item.obj.visible = false;
           continue;
         }
@@ -1418,8 +1441,8 @@
         }
 
         // 3. Line-Of-Sight Terrain Occlusion Test:
-        // Hide peak badges if obstructed by intermediate mountain ridges
-        if (isPeakOccluded(cx, cy, cz, px, py, pz)) {
+        // Hide peak badges if obstructed by intermediate mountain ridges (selected peak stays visible)
+        if (!isSelected && isPeakOccluded(cx, cy, cz, px, py, pz)) {
           item.obj.visible = false;
         } else {
           item.obj.visible = true;
@@ -1781,6 +1804,11 @@
       const step = Math.max(camera.position.y * 0.12, 10.0);
 
       switch (e.key) {
+        case 'Escape':
+          if (selectedPeakIndex >= 0) {
+            closeInspector();
+          }
+          break;
         case 'ArrowUp':
         case 'w':
         case 'W':
