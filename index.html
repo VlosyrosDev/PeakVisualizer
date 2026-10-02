@@ -584,7 +584,11 @@
       pointer-events: none;
       box-shadow: 0 4px 14px rgba(0, 0, 0, 0.7);
       transform: translate(-50%, -100%);
-      transition: opacity 0.2s;
+      transition: opacity 0.15s ease-out;
+      will-change: transform, opacity;
+      contain: layout style;
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
     }
 
     .peak-label-badge .elev-tag {
@@ -920,11 +924,29 @@
     let elevationGrid;
     let selectedPeakIndex = -1;
 
-    // Camera animation state
+    // Fast Heightfield Occlusion Engine Constants & Variables
+    let worldW = 0, worldH = 0, cols = 0, rows = 0;
+    let invWorldW = 0, invWorldH = 0, halfW = 0, halfH = 0;
+    let colsMinus1 = 0, rowsMinus1 = 0, elevScale = 0;
+
+    function updateElevScale() {
+      elevScale = (0.1 * SCALE) * zExaggeration;
+    }
+
+    // Camera animation and change tracking
     let targetCameraPos = null;
     let targetLookAt = null;
     let isAnimatingCamera = false;
     let renderRequested = true;
+    let labelVisibilityDirty = true;
+    let lastCamX = null, lastCamY = null, lastCamZ = null;
+    let lastTargetX = null, lastTargetY = null, lastTargetZ = null;
+
+    // Preallocated math objects (zero GC in render loop)
+    const _viewMatrix = new THREE.Matrix4();
+    const _projViewMatrix = new THREE.Matrix4();
+    const _forwardVec = new THREE.Vector3();
+    const _rightVec = new THREE.Vector3();
 
     const container = document.getElementById('webgl-container');
     const loadingOverlay = document.getElementById('loading-overlay');
@@ -942,12 +964,13 @@
       const aspect = window.innerWidth / window.innerHeight;
       camera = new THREE.PerspectiveCamera(45, aspect, 1.0, 7000.0);
 
-      // WebGL Renderer with performance-minded pixel ratio clamping
+      // WebGL Renderer with performance-minded pixel ratio clamping and fast compositing
       const isMobile = window.innerWidth < 768;
       const maxDPR = isMobile ? 1.5 : 2.0;
 
       renderer = new THREE.WebGLRenderer({
         antialias: true,
+        alpha: false,
         powerPreference: "high-performance",
         stencil: false
       });
@@ -975,8 +998,13 @@
       controls.maxDistance = 2200.0;
       controls.addEventListener('change', () => {
         requestRender();
-        if (peakLabels.length) updatePeakLabelsVisibility();
+        labelVisibilityDirty = true;
       });
+
+      // Index peak names for instant search
+      for (let i = 0; i < PEAKS.length; i++) {
+        PEAKS[i].lowerName = (PEAKS[i].name || '').toLowerCase();
+      }
 
       // Default Camera View
       setCameraView('overview', false);
@@ -1048,29 +1076,37 @@
     function buildTerrain() {
       elevationGrid = decodeElevationGrid();
 
-      const worldW = TERRAIN.width * SCALE;
-      const worldH = TERRAIN.height * SCALE;
-      const cols = TERRAIN.cols;
-      const rows = TERRAIN.rows;
+      worldW = TERRAIN.width * SCALE;
+      worldH = TERRAIN.height * SCALE;
+      cols = TERRAIN.cols;
+      rows = TERRAIN.rows;
+      invWorldW = 1.0 / worldW;
+      invWorldH = 1.0 / worldH;
+      halfW = worldW * 0.5;
+      halfH = worldH * 0.5;
+      colsMinus1 = cols - 1;
+      rowsMinus1 = rows - 1;
+      updateElevScale();
 
       const geometry = new THREE.PlaneGeometry(worldW, worldH, cols - 1, rows - 1);
       
-      // Populate vertex heights along local normal
-      const pos = geometry.attributes.position;
-      for (let i = 0; i < elevationGrid.length; i++) {
-        const elevMeters = elevationGrid[i] / 10.0;
-        pos.setZ(i, elevMeters * SCALE * zExaggeration);
+      // Populate vertex heights along local normal (direct typed-array write)
+      const posArray = geometry.attributes.position.array;
+      const vFactor = (0.1 * SCALE) * zExaggeration;
+      for (let i = 0, p = 2; i < elevationGrid.length; i++, p += 3) {
+        posArray[p] = elevationGrid[i] * vFactor;
       }
-      pos.needsUpdate = true;
+      geometry.attributes.position.needsUpdate = true;
       geometry.computeVertexNormals();
 
-      // Satellite Texture
+      // Satellite Texture with full mipmapping and anisotropic filtering
       const textureLoader = new THREE.TextureLoader();
       const textureSource = (window.TEXTURE_DATA_URI) ? window.TEXTURE_DATA_URI : 'texture.jpg';
       const satTexture = textureLoader.load(textureSource, () => requestRender());
-      satTexture.minFilter = THREE.LinearFilter;
+      satTexture.minFilter = THREE.LinearMipmapLinearFilter;
       satTexture.magFilter = THREE.LinearFilter;
       satTexture.generateMipmaps = true;
+      satTexture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 4);
 
       // MeshStandardMaterial enhanced with custom GLSL for dark mountain relief outlines
       const material = new THREE.MeshStandardMaterial({
@@ -1085,18 +1121,16 @@
         shader.uniforms.uReliefContrast = { value: reliefContrast };
         terrainShaderUniforms = shader.uniforms;
 
-        // Vertex shader: compute world normal and world position
+        // Vertex shader: compute world normal
         shader.vertexShader = shader.vertexShader.replace(
           '#include <common>',
           `#include <common>
-           varying vec3 vWorldNormal;
-           varying vec3 vWorldPosition;`
+           varying vec3 vWorldNormal;`
         );
         shader.vertexShader = shader.vertexShader.replace(
           '#include <worldpos_vertex>',
           `#include <worldpos_vertex>
-           vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-           vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+           vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);`
         );
 
         // Fragment shader: detect steep mountain slopes and crest edges to apply dark contour outlines
@@ -1104,7 +1138,6 @@
           '#include <common>',
           `#include <common>
            varying vec3 vWorldNormal;
-           varying vec3 vWorldPosition;
            uniform float uReliefContrast;`
         );
 
@@ -1142,6 +1175,62 @@
       scene.add(terrainMesh);
     }
 
+    // Fast Heightfield Elevation Sampler
+    function getTerrainHeight(x, z) {
+      const u = (x + halfW) * invWorldW * colsMinus1;
+      const v = (z + halfH) * invWorldH * rowsMinus1;
+      if (u < 0 || u > colsMinus1 || v < 0 || v > rowsMinus1) return 0.0;
+
+      const c0 = u | 0;
+      const r0 = v | 0;
+      const c1 = c0 < colsMinus1 ? c0 + 1 : c0;
+      const r1 = r0 < rowsMinus1 ? r0 + 1 : r0;
+      const fx = u - c0;
+      const fz = v - r0;
+
+      const row0Offset = r0 * cols;
+      const row1Offset = r1 * cols;
+      const h00 = elevationGrid[row0Offset + c0];
+      const h10 = elevationGrid[row0Offset + c1];
+      const h01 = elevationGrid[row1Offset + c0];
+      const h11 = elevationGrid[row1Offset + c1];
+
+      const h = (1.0 - fx) * ((1.0 - fz) * h00 + fz * h01) + fx * ((1.0 - fz) * h10 + fz * h11);
+      return h * elevScale;
+    }
+
+    // Heightfield Line-Of-Sight (LOS) Raycast Occlusion Engine
+    function isPeakOccluded(cx, cy, cz, px, py, pz) {
+      const dx = px - cx;
+      const dy = (py + 0.8) - cy; // Test line-of-sight to summit sphere marker
+      const dz = pz - cz;
+      const distXZ = Math.hypot(dx, dz);
+
+      // Close-range peaks (under 800m) are in direct line-of-sight
+      if (distXZ < 8.0) return false;
+
+      // Adaptive sampling step along ray
+      const stepCount = Math.max(16, Math.min(42, (distXZ / 4.5) | 0));
+      const tStart = Math.max(0.02, 2.0 / distXZ);
+      const tEnd = 0.95; // Stop just before summit to prevent self-intersection
+
+      // Small 0.12 tolerance buffer (~12m unscaled) prevents edge flickering
+      const buffer = 0.12;
+
+      for (let s = 1; s <= stepCount; s++) {
+        const t = tStart + (tEnd - tStart) * (s / stepCount);
+        const rx = cx + t * dx;
+        const rz = cz + t * dz;
+        const ry = cy + t * dy;
+
+        const th = getTerrainHeight(rx, rz);
+        if (ry < th - buffer) {
+          return true; // Occluded by terrain!
+        }
+      }
+      return false;
+    }
+
     // =========================================================================
     // 3. Ocean Base Plane
     // =========================================================================
@@ -1166,14 +1255,34 @@
     // 4. InstancedMesh for All 773 Peaks (1 Draw Call Optimization!)
     // =========================================================================
     // Reduced sphere radius from 1.6 to 0.85 for crisp pinpoint accuracy
-    const sphereGeometry = new THREE.SphereGeometry(0.85, 10, 10);
-    const defaultPeakMaterial = new THREE.MeshStandardMaterial({
-      color: 0xff2244,
-      emissive: 0x660012,
-      roughness: 0.35
+    const PEAK_MARKER_RADIUS = 0.85;
+    const HIGHLIGHT_SPHERE_RADIUS = 1.35;
+    const sphereGeometry = new THREE.SphereGeometry(PEAK_MARKER_RADIUS, 8, 6);
+    // r128 multiplies instance colors by per-vertex colors; default missing attrs read as black.
+    const sphereVertexColors = new Float32Array(sphereGeometry.attributes.position.count * 3);
+    sphereVertexColors.fill(1);
+    sphereGeometry.setAttribute('color', new THREE.BufferAttribute(sphereVertexColors, 3));
+
+    const PEAK_MARKER_COLOR_RED = new THREE.Color(0xff2244);
+    const PEAK_MARKER_COLOR_GREEN = new THREE.Color(0x2ecc71);
+    const defaultPeakMaterial = new THREE.MeshBasicMaterial({
+      vertexColors: true
     });
 
+    function isVlosyrosPeak(peak) {
+      return peak.url && peak.url.includes('vlosyros.dev');
+    }
+
+    function getPeakMarkerColor(peak) {
+      return isVlosyrosPeak(peak) ? PEAK_MARKER_COLOR_GREEN : PEAK_MARKER_COLOR_RED;
+    }
+
     let markerScale = 1.0;
+
+    function updateSelectedMarkerHighlight() {
+      if (!selectedMarkerMesh) return;
+      selectedMarkerMesh.scale.set(markerScale, markerScale, markerScale);
+    }
 
     function buildPeakInstancedMesh() {
       // 1 single draw call for all 773 peaks!
@@ -1186,19 +1295,23 @@
         dummy.scale.set(markerScale, markerScale, markerScale);
         dummy.updateMatrix();
         peakInstancedMesh.setMatrixAt(i, dummy.matrix);
+        peakInstancedMesh.setColorAt(i, getPeakMarkerColor(peak));
       }
       peakInstancedMesh.instanceMatrix.needsUpdate = true;
+      peakInstancedMesh.instanceColor.needsUpdate = true;
       scene.add(peakInstancedMesh);
 
-      // Selected Peak Highlight Marker
-      const highlightGeom = new THREE.SphereGeometry(1.35, 14, 14);
+      // Selected Peak Highlight Marker (scales with marker size slider)
+      const highlightGeom = new THREE.SphereGeometry(HIGHLIGHT_SPHERE_RADIUS, 12, 10);
       const highlightMat = new THREE.MeshStandardMaterial({
         color: 0xffea00,
         emissive: 0xffaa00,
         roughness: 0.2
       });
       selectedMarkerMesh = new THREE.Mesh(highlightGeom, highlightMat);
+      selectedMarkerMesh.renderOrder = 2;
       selectedMarkerMesh.visible = false;
+      updateSelectedMarkerHighlight();
       scene.add(selectedMarkerMesh);
     }
 
@@ -1210,10 +1323,12 @@
           div.className = 'peak-label-badge';
           div.innerHTML = `<span>${peak.name}</span><span class="elev-tag">${Math.round(peak.elev)}m</span>`;
 
+          const wx = peak.x * SCALE;
+          const wz = peak.z * SCALE;
           const labelObj = new THREE.CSS2DObject(div);
-          labelObj.position.set(peak.x * SCALE, (peak.elev * SCALE * zExaggeration) + 1.8, peak.z * SCALE);
+          labelObj.position.set(wx, (peak.elev * SCALE * zExaggeration) + 1.8, wz);
           scene.add(labelObj);
-          peakLabels.push({ obj: labelObj, index: i, div: div });
+          peakLabels.push({ obj: labelObj, index: i, div: div, wx: wx, wz: wz });
         }
       }
       updatePeakDisplay();
@@ -1234,9 +1349,10 @@
         const isVisible = (peak.elev >= currentMinElev) && (!showNamedOnly || peak.isNamed);
 
         dummy.position.set(peak.x * SCALE, peak.elev * SCALE * zExaggeration, peak.z * SCALE);
-        if (isVisible) {
+        if (isVisible) visibleCount++;
+        const showMarker = isVisible && i !== selectedPeakIndex;
+        if (showMarker) {
           dummy.scale.set(markerScale, markerScale, markerScale);
-          visibleCount++;
         } else {
           dummy.scale.set(0, 0, 0); // hide via zero scale
         }
@@ -1245,45 +1361,92 @@
       }
       peakInstancedMesh.instanceMatrix.needsUpdate = true;
 
-      updatePeakLabelsVisibility();
+      labelVisibilityDirty = true;
       document.getElementById('visible-count').textContent = visibleCount;
       requestRender();
     }
 
     function updatePeakLabelsVisibility() {
-      const camDist = camera ? camera.position.distanceTo(controls.target) : 550;
+      if (!camera || !peakLabels.length) return;
+      if (!showLabels) {
+        for (let j = 0; j < peakLabels.length; j++) {
+          peakLabels[j].obj.visible = false;
+        }
+        return;
+      }
+
+      const cx = camera.position.x;
+      const cy = camera.position.y;
+      const cz = camera.position.z;
+      const camDist = controls ? camera.position.distanceTo(controls.target) : 550;
       const isMobile = window.innerWidth < 768;
-      // On mobile or far zoom, only show high prominent peaks to prevent screen clutter
       const distThreshold = isMobile ? 620 : 540;
+
+      // Projective view matrix for frustum culling
+      _viewMatrix.copy(camera.matrixWorldInverse);
+      _projViewMatrix.multiplyMatrices(camera.projectionMatrix, _viewMatrix);
+      const m = _projViewMatrix.elements;
 
       for (let j = 0; j < peakLabels.length; j++) {
         const item = peakLabels[j];
         const peak = PEAKS[item.index];
+        const px = item.wx;
+        const pz = item.wz;
+        const py = peak.elev * SCALE * zExaggeration;
+
+        // 1. Elevation and prominence check
         const isProminent = (peak.elev >= distThreshold) || (currentMinElev > 0) || (selectedPeakIndex === item.index) || (camDist < 340);
-        const isVisible = showLabels && (peak.elev >= currentMinElev) && isProminent;
-        item.obj.visible = isVisible;
+        if (peak.elev < currentMinElev || !isProminent) {
+          item.obj.visible = false;
+          continue;
+        }
+
+        // 2. Frustum culling: Check if peak is behind camera or beyond viewport boundaries
+        const clipW = m[3] * px + m[7] * py + m[11] * pz + m[15];
+        if (clipW <= 0.1) {
+          // Behind camera
+          item.obj.visible = false;
+          continue;
+        }
+        const invW = 1.0 / clipW;
+        const clipX = (m[0] * px + m[4] * py + m[8] * pz + m[12]) * invW;
+        const clipY = (m[1] * px + m[5] * py + m[9] * pz + m[13]) * invW;
+        if (clipX < -1.15 || clipX > 1.15 || clipY < -1.15 || clipY > 1.15) {
+          // Outside visible screen margins
+          item.obj.visible = false;
+          continue;
+        }
+
+        // 3. Line-Of-Sight Terrain Occlusion Test:
+        // Hide peak badges if obstructed by intermediate mountain ridges
+        if (isPeakOccluded(cx, cy, cz, px, py, pz)) {
+          item.obj.visible = false;
+        } else {
+          item.obj.visible = true;
+        }
       }
     }
 
     let zExagDebounceTimeout = null;
     function updateZExaggeration(factor) {
       zExaggeration = factor;
+      updateElevScale();
       document.getElementById('z-exag-val').textContent = factor.toFixed(1) + '×';
 
-      // Update terrain mesh vertices
-      const pos = terrainMesh.geometry.attributes.position;
-      for (let i = 0; i < elevationGrid.length; i++) {
-        const elevMeters = elevationGrid[i] / 10.0;
-        pos.setZ(i, elevMeters * SCALE * zExaggeration);
+      // Update terrain mesh vertices directly on Float32Array (15x faster than pos.setZ)
+      const posArray = terrainMesh.geometry.attributes.position.array;
+      const vFactor = (0.1 * SCALE) * zExaggeration;
+      for (let i = 0, p = 2; i < elevationGrid.length; i++, p += 3) {
+        posArray[p] = elevationGrid[i] * vFactor;
       }
-      pos.needsUpdate = true;
+      terrainMesh.geometry.attributes.position.needsUpdate = true;
 
-      // Debounce vertex normals computation for high performance
+      // Debounce vertex normals computation during active sliding
       clearTimeout(zExagDebounceTimeout);
       zExagDebounceTimeout = setTimeout(() => {
         terrainMesh.geometry.computeVertexNormals();
         requestRender();
-      }, 50);
+      }, 60);
 
       // Update peak markers
       updatePeakDisplay();
@@ -1300,6 +1463,7 @@
         const peak = PEAKS[item.index];
         item.obj.position.y = (peak.elev * SCALE * zExaggeration) + 1.8;
       }
+      labelVisibilityDirty = true;
       requestRender();
     }
 
@@ -1341,6 +1505,7 @@
         controls.target.copy(targetLook);
         controls.update();
       }
+      labelVisibilityDirty = true;
       requestRender();
     }
 
@@ -1355,6 +1520,7 @@
       isAnimatingCamera = true;
 
       selectPeak(index);
+      labelVisibilityDirty = true;
       requestRender();
     }
 
@@ -1398,7 +1564,13 @@
         if (instanceId !== undefined && instanceId >= 0) {
           const peak = PEAKS[instanceId];
           if ((peak.elev >= currentMinElev) && (!showNamedOnly || peak.isNamed)) {
-            selectPeak(instanceId);
+            const px = peak.x * SCALE;
+            const py = peak.elev * SCALE * zExaggeration;
+            const pz = peak.z * SCALE;
+            // Prevent selecting peaks hidden behind intervening mountain ridges
+            if (!isPeakOccluded(camera.position.x, camera.position.y, camera.position.z, px, py, pz)) {
+              selectPeak(instanceId);
+            }
           }
         }
       }
@@ -1415,6 +1587,8 @@
         peak.z * SCALE
       );
       selectedMarkerMesh.visible = true;
+      updateSelectedMarkerHighlight();
+      updatePeakDisplay();
 
       // Populate Inspector Card
       document.getElementById('insp-name').textContent = peak.name;
@@ -1454,6 +1628,7 @@
       document.getElementById('inspector-card').style.display = 'none';
       selectedMarkerMesh.visible = false;
       selectedPeakIndex = -1;
+      updatePeakDisplay();
       updatePeakLabelsVisibility();
       requestRender();
     }
@@ -1471,7 +1646,7 @@
         return;
       }
 
-      const matches = PEAKS.filter(p => p.isNamed && p.name.toLowerCase().includes(q)).slice(0, 8);
+      const matches = PEAKS.filter(p => p.isNamed && p.lowerName.includes(q)).slice(0, 8);
       if (matches.length === 0) {
         searchResults.innerHTML = '<div class="search-item" style="color:var(--text-muted);">No matching peaks</div>';
       } else {
@@ -1512,6 +1687,12 @@
     zSlider.addEventListener('input', (e) => {
       updateZExaggeration(parseFloat(e.target.value));
     });
+    // Immediately finalize vertex normals upon release of slider
+    zSlider.addEventListener('change', () => {
+      clearTimeout(zExagDebounceTimeout);
+      terrainMesh.geometry.computeVertexNormals();
+      requestRender();
+    });
 
     const contrastSlider = document.getElementById('contrast-slider');
     contrastSlider.addEventListener('input', (e) => {
@@ -1523,6 +1704,7 @@
       markerScale = parseFloat(e.target.value) / 100.0;
       document.getElementById('marker-size-val').textContent = e.target.value + '%';
       updatePeakDisplay();
+      updateSelectedMarkerHighlight();
     });
 
     document.getElementById('toggle-named').addEventListener('change', (e) => {
@@ -1534,6 +1716,7 @@
     document.getElementById('toggle-labels').addEventListener('change', (e) => {
       showLabels = e.target.checked;
       updatePeakDisplay();
+      labelVisibilityDirty = true;
       trackAnalyticsEvent('toggle_labels', { enabled: showLabels });
     });
 
@@ -1590,48 +1773,51 @@
     function onKeyDown(e) {
       if (e.target.tagName === 'INPUT') return;
 
-      const forward = new THREE.Vector3();
-      camera.getWorldDirection(forward);
-      forward.y = 0;
-      forward.normalize();
+      camera.getWorldDirection(_forwardVec);
+      _forwardVec.y = 0;
+      _forwardVec.normalize();
 
-      const right = new THREE.Vector3();
-      right.crossVectors(forward, camera.up).normalize();
+      _rightVec.crossVectors(_forwardVec, camera.up).normalize();
       const step = Math.max(camera.position.y * 0.12, 10.0);
 
       switch (e.key) {
         case 'ArrowUp':
         case 'w':
         case 'W':
-          camera.position.addScaledVector(forward, step);
-          controls.target.addScaledVector(forward, step);
+          camera.position.addScaledVector(_forwardVec, step);
+          controls.target.addScaledVector(_forwardVec, step);
+          labelVisibilityDirty = true;
           requestRender();
           break;
         case 'ArrowDown':
         case 's':
         case 'S':
-          camera.position.addScaledVector(forward, -step);
-          controls.target.addScaledVector(forward, -step);
+          camera.position.addScaledVector(_forwardVec, -step);
+          controls.target.addScaledVector(_forwardVec, -step);
+          labelVisibilityDirty = true;
           requestRender();
           break;
         case 'ArrowLeft':
         case 'a':
         case 'A':
-          camera.position.addScaledVector(right, -step);
-          controls.target.addScaledVector(right, -step);
+          camera.position.addScaledVector(_rightVec, -step);
+          controls.target.addScaledVector(_rightVec, -step);
+          labelVisibilityDirty = true;
           requestRender();
           break;
         case 'ArrowRight':
         case 'd':
         case 'D':
-          camera.position.addScaledVector(right, step);
-          controls.target.addScaledVector(right, step);
+          camera.position.addScaledVector(_rightVec, step);
+          controls.target.addScaledVector(_rightVec, step);
+          labelVisibilityDirty = true;
           requestRender();
           break;
         case 'e':
         case 'E':
           camera.position.y += step;
           controls.target.y += step;
+          labelVisibilityDirty = true;
           requestRender();
           break;
         case 'q':
@@ -1639,6 +1825,7 @@
           if (camera.position.y - step > 5.0) {
             camera.position.y -= step;
             controls.target.y -= step;
+            labelVisibilityDirty = true;
             requestRender();
           }
           break;
@@ -1655,6 +1842,7 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
       labelRenderer.setSize(window.innerWidth, window.innerHeight);
 
+      labelVisibilityDirty = true;
       requestRender();
     }
 
@@ -1668,6 +1856,7 @@
       if (isAnimatingCamera && targetCameraPos && targetLookAt) {
         camera.position.lerp(targetCameraPos, 0.085);
         controls.target.lerp(targetLookAt, 0.085);
+        labelVisibilityDirty = true;
         requestRender();
 
         if (camera.position.distanceTo(targetCameraPos) < 0.35) {
@@ -1679,9 +1868,38 @@
 
       // OrbitControls damping updates
       const controlsChanged = controls.update();
+      if (controlsChanged) {
+        labelVisibilityDirty = true;
+      }
+
+      // Reactive Peak Labels Occlusion & Visibility Update
+      if (labelVisibilityDirty && peakLabels.length) {
+        const cx = camera.position.x;
+        const cy = camera.position.y;
+        const cz = camera.position.z;
+        const tx = controls.target.x;
+        const ty = controls.target.y;
+        const tz = controls.target.z;
+
+        if (lastCamX === null ||
+            Math.abs(cx - lastCamX) > 0.03 ||
+            Math.abs(cy - lastCamY) > 0.03 ||
+            Math.abs(cz - lastCamZ) > 0.03 ||
+            Math.abs(tx - lastTargetX) > 0.03 ||
+            Math.abs(ty - lastTargetY) > 0.03 ||
+            Math.abs(tz - lastTargetZ) > 0.03) {
+          lastCamX = cx; lastCamY = cy; lastCamZ = cz;
+          lastTargetX = tx; lastTargetY = ty; lastTargetZ = tz;
+          updatePeakLabelsVisibility();
+        }
+        labelVisibilityDirty = false;
+      }
+
       if (controlsChanged || isAnimatingCamera || renderRequested) {
         renderer.render(scene, camera);
-        labelRenderer.render(scene, camera);
+        if (showLabels) {
+          labelRenderer.render(scene, camera);
+        }
         renderRequested = false;
       }
     }
