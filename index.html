@@ -2422,16 +2422,26 @@ function flyToPeak(index) {
     }
 
     function focusUserLocation() {
-      if (!userLocationGroup || !userLocationGroup.visible) return false;
+  if (!userLocationGroup || !userLocationGroup.visible) return false;
 
-      const { x, y, z } = userLocationGroup.position;
-      targetCameraPos = new THREE.Vector3(x - 34, y + 42, z + 54);
-      targetLookAt = new THREE.Vector3(x, y, z);
-      isAnimatingCamera = true;
-      labelVisibilityDirty = true;
-      requestRender();
-      return true;
-    }
+  const { x, y, z } = userLocationGroup.position;
+  targetLookAt = new THREE.Vector3(x, y, z);
+
+  // Base camera offset relative to the user (Behind, above, and slightly right)
+  // Local coordinate space: +Z is behind user, +Y is up, +X is right
+  const localOffset = new THREE.Vector3(0, 0, 0);
+
+  // Rotate the offset by the user's Y rotation (heading)
+  localOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), userLocationGroup.rotation.y);
+
+  // Set target position relative to world position
+  targetCameraPos = new THREE.Vector3(x, y, z).add(localOffset);
+
+  isAnimatingCamera = true;
+  labelVisibilityDirty = true;
+  requestRender();
+  return true;
+}
 
     function placeUserMarker(lat, lon, accuracyM) {
   buildUserLocationMarker();
