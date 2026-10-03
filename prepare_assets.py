@@ -162,6 +162,8 @@ def main():
     terrain_data = {
         "width": round(world_width, 1),
         "height": round(world_height, 1),
+        "centerUtmX": round(center_x, 1),
+        "centerUtmY": round(center_y, 1),
         "cols": GRID_COLS,
         "rows": GRID_ROWS,
         "minElev": round(min_elev, 1),
