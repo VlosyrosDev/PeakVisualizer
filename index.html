@@ -2423,7 +2423,7 @@ function flyToPeak(index) {
 
   // Base camera offset relative to the user (Behind, above, and slightly right)
   // Local coordinate space: +Z is behind user, +Y is up, +X is right
-  const localOffset = new THREE.Vector3(0, 10, 60);
+  const localOffset = new THREE.Vector3(0, 10, 10);
 
   // Rotate the offset by the user's Y rotation (heading)
   localOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), userLocationGroup.rotation.y);
