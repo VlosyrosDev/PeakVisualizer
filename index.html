@@ -949,6 +949,15 @@
       <div class="chip" onclick="applyQuickFilter('protected', this)">Protected</div>
     </div>
 
+    <!-- Camera Views: placed early so it remains clear of mobile map controls -->
+    <div class="section-title">Camera Views</div>
+    <div class="preset-grid">
+      <button class="preset-btn" onclick="setCameraView('overview')">🏝️ Island View</button>
+      <button class="preset-btn" onclick="setCameraView('portlouis')">🏙️ Port Louis Range</button>
+      <button class="preset-btn" onclick="setCameraView('southwest')">⛰️ Black River Gorges</button>
+      <button class="preset-btn" onclick="setCameraView('topdown')">🗺️ Top-Down Map</button>
+    </div>
+
     <!-- Sliders -->
     <div class="section-title">Elevation & Relief Controls</div>
     <div class="slider-group">
@@ -1000,15 +1009,6 @@
         <span class="slider-round"></span>
       </div>
     </label>
-
-    <!-- Camera Views -->
-    <div class="section-title">Camera Views</div>
-    <div class="preset-grid">
-      <button class="preset-btn" onclick="setCameraView('overview')">🏝️ Island View</button>
-      <button class="preset-btn" onclick="setCameraView('portlouis')">🏙️ Port Louis Range</button>
-      <button class="preset-btn" onclick="setCameraView('southwest')">⛰️ Black River Gorges</button>
-      <button class="preset-btn" onclick="setCameraView('topdown')">🗺️ Top-Down Map</button>
-    </div>
 
     <!-- Desktop Controls Legend -->
     <div class="controls-help">
@@ -1911,9 +1911,9 @@
         elevSlider.value = 500;
         document.getElementById('toggle-named').checked = false;
       } else if (type === 'top10') {
-        currentMinElev = 700;
+        currentMinElev = 690;
         showNamedOnly = true;
-        elevSlider.value = 700;
+        elevSlider.value = 690;
         document.getElementById('toggle-named').checked = true;
       } else if (type === 'protected') {
         currentMinElev = 0;
