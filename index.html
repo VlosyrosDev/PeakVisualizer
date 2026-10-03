@@ -204,10 +204,6 @@
       margin: 0 auto 12px auto;
     }
 
-    .drawer-close-btn {
-      display: none;
-    }
-
     .toggle-panel-btn {
       position: absolute;
       left: 14px;
@@ -715,25 +711,6 @@
         display: block;
       }
 
-      .drawer-close-btn {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        width: 32px;
-        height: 32px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0;
-        border: 1px solid var(--panel-border);
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.08);
-        color: var(--text-main);
-        font-size: 22px;
-        line-height: 1;
-        cursor: pointer;
-      }
-
       .controls-help {
         display: none; /* Hide keyboard shortcut help on mobile touch devices */
       }
@@ -763,8 +740,23 @@
         display: none;
       }
 
-      /* The drawer uses its own top-right close control while open. */
+      /* Turn the launcher into a close control above the open drawer. */
       .controls-panel.open ~ .toggle-panel-btn {
+        left: 50%;
+        bottom: calc(60vh + 18px);
+        width: 38px;
+        height: 38px;
+        padding: 0;
+        justify-content: center;
+        border-radius: 50%;
+        transform: translateX(-50%);
+      }
+
+      .controls-panel.open ~ .toggle-panel-btn:hover {
+        transform: translateX(-50%) translateY(-1px);
+      }
+
+      .controls-panel.open ~ .toggle-panel-btn #panel-btn-text {
         display: none;
       }
 
@@ -950,7 +942,6 @@
   <!-- Controls Panel (Desktop Sidebar / Mobile Drawer) -->
   <div class="controls-panel collapsed" id="controls-panel">
     <div class="drawer-handle" onclick="toggleSidebar()"></div>
-    <button class="drawer-close-btn" onclick="toggleSidebar()" aria-label="Close filters and settings">×</button>
 
     <div class="counter-badge">
       <div>
@@ -1047,7 +1038,7 @@
 
   <!-- Toggle Sidebar Button -->
   <button class="toggle-panel-btn" onclick="toggleSidebar()">
-    <span id="panel-btn-icon">⚙️</span> <span>Filters & Settings</span>
+    <span id="panel-btn-icon">⚙️</span> <span id="panel-btn-text">Filters & Settings</span>
   </button>
 
   <!-- My Location Button -->
@@ -1956,6 +1947,10 @@
 
       if (isMobile) {
         panel.classList.toggle('open');
+        const isOpen = panel.classList.contains('open');
+        const toggleButton = document.querySelector('.toggle-panel-btn');
+        document.getElementById('panel-btn-icon').textContent = isOpen ? '×' : '⚙️';
+        toggleButton.setAttribute('aria-label', isOpen ? 'Close filters and settings' : 'Open filters and settings');
       } else {
         panel.classList.toggle('collapsed');
       }
