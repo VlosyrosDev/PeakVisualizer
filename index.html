@@ -736,10 +736,19 @@
       }
 
       /* The drawer owns the bottom of the screen while it is open. */
-      .controls-panel.open ~ .toggle-panel-btn,
-      .controls-panel.open ~ .locate-btn,
-      .controls-panel.open ~ .gps-status {
+      .controls-panel.open ~ .locate-btn {
         display: none;
+      }
+
+      /* Keep the drawer toggle available so the open drawer can be closed. */
+      .controls-panel.open ~ .toggle-panel-btn {
+        display: flex;
+      }
+
+      /* GPS status is set inline while tracking, so CSS needs to explicitly
+         override it while the drawer is open. */
+      .controls-panel.open ~ .gps-status {
+        display: none !important;
       }
 
       input[type="range"]::-webkit-slider-thumb {
