@@ -961,7 +961,6 @@
       <div class="chip" onclick="applyQuickFilter('named', this)">Named Only</div>
       <div class="chip" onclick="applyQuickFilter('high', this)">> 500m</div>
       <div class="chip" onclick="applyQuickFilter('top10', this)">Top 10</div>
-      <div class="chip" onclick="applyQuickFilter('protected', this)">Protected</div>
     </div>
 
     <!-- Camera Views: placed early so it remains clear of mobile map controls -->
@@ -1954,11 +1953,6 @@ function flyToPeak(index) {
         showNamedOnly = true;
         elevSlider.value = 690;
         document.getElementById('toggle-named').checked = true;
-      } else if (type === 'protected') {
-        currentMinElev = 0;
-        showNamedOnly = true;
-        elevSlider.value = 0;
-        document.getElementById('toggle-named').checked = true;
       }
 
       document.getElementById('min-elev-val').textContent = Math.round(currentMinElev) + ' m';
@@ -2429,7 +2423,7 @@ function flyToPeak(index) {
 
   // Base camera offset relative to the user (Behind, above, and slightly right)
   // Local coordinate space: +Z is behind user, +Y is up, +X is right
-  const localOffset = new THREE.Vector3(0, 42, 60);
+  const localOffset = new THREE.Vector3(0, 10, 60);
 
   // Rotate the offset by the user's Y rotation (heading)
   localOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), userLocationGroup.rotation.y);
