@@ -204,6 +204,10 @@
       margin: 0 auto 12px auto;
     }
 
+    .drawer-close-btn {
+      display: none;
+    }
+
     .toggle-panel-btn {
       position: absolute;
       left: 14px;
@@ -711,6 +715,25 @@
         display: block;
       }
 
+      .drawer-close-btn {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 1px solid var(--panel-border);
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-main);
+        font-size: 22px;
+        line-height: 1;
+        cursor: pointer;
+      }
+
       .controls-help {
         display: none; /* Hide keyboard shortcut help on mobile touch devices */
       }
@@ -740,9 +763,9 @@
         display: none;
       }
 
-      /* Keep the drawer toggle available so the open drawer can be closed. */
+      /* The drawer uses its own top-right close control while open. */
       .controls-panel.open ~ .toggle-panel-btn {
-        display: flex;
+        display: none;
       }
 
       /* GPS status is set inline while tracking, so CSS needs to explicitly
@@ -927,6 +950,7 @@
   <!-- Controls Panel (Desktop Sidebar / Mobile Drawer) -->
   <div class="controls-panel collapsed" id="controls-panel">
     <div class="drawer-handle" onclick="toggleSidebar()"></div>
+    <button class="drawer-close-btn" onclick="toggleSidebar()" aria-label="Close filters and settings">×</button>
 
     <div class="counter-badge">
       <div>
