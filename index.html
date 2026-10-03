@@ -2221,81 +2221,84 @@
     let userHeadingDeg = 0;
 
     function buildUserLocationMarker() {
-      if (userLocationGroup) return; // Already built
+  if (userLocationGroup) return; // Already built
 
-      userLocationGroup = new THREE.Group();
-      userLocationGroup.visible = false;
-      userLocationGroup.renderOrder = 5;
-      scene.add(userLocationGroup);
+  userLocationGroup = new THREE.Group();
+  userLocationGroup.visible = false;
+  userLocationGroup.renderOrder = 5;
+  scene.add(userLocationGroup);
 
-      // --- Pulsing accuracy ring (flat circle on the ground) ---
-      const ringGeom = new THREE.RingGeometry(0.6, 1.0, 32);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: 0x3498db,
-        transparent: true,
-        opacity: 0.35,
-        side: THREE.DoubleSide,
-        depthWrite: false
-      });
-      const accuracyRing = new THREE.Mesh(ringGeom, ringMat);
-      accuracyRing.rotation.x = -Math.PI / 2;
-      accuracyRing.name = 'accuracyRing';
-      userLocationGroup.add(accuracyRing);
+  // --- Pulsing accuracy ring (flat circle on the ground) ---
+  const ringGeom = new THREE.RingGeometry(0.6, 1.0, 32);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0x3498db,
+    transparent: true,
+    opacity: 0.35,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    depthTest: false // Ensures terrain mesh won't hide the flat ring
+  });
+  const accuracyRing = new THREE.Mesh(ringGeom, ringMat);
+  accuracyRing.rotation.x = -Math.PI / 2;
+  accuracyRing.name = 'accuracyRing';
+  accuracyRing.renderOrder = 5;
+  userLocationGroup.add(accuracyRing);
 
-      // --- Solid dot (sphere) at user position ---
-      const dotGeom = new THREE.SphereGeometry(0.55, 12, 8);
-      const dotMat = new THREE.MeshBasicMaterial({ color: 0x3498db });
-      const dot = new THREE.Mesh(dotGeom, dotMat);
-      dot.position.y = 0.55;
-      dot.name = 'dot';
-      userLocationGroup.add(dot);
+  // --- Solid dot (sphere) at user position ---
+  const dotGeom = new THREE.SphereGeometry(0.55, 12, 8);
+  const dotMat = new THREE.MeshBasicMaterial({ color: 0x3498db });
+  const dot = new THREE.Mesh(dotGeom, dotMat);
+  dot.position.y = 0.55;
+  dot.name = 'dot';
+  dot.renderOrder = 7;
+  userLocationGroup.add(dot);
 
-      // --- White border ring around dot ---
-      const borderGeom = new THREE.RingGeometry(0.55, 0.75, 24);
-      const borderMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.9,
-        side: THREE.DoubleSide,
-        depthWrite: false
-      });
-      const border = new THREE.Mesh(borderGeom, borderMat);
-      border.rotation.x = -Math.PI / 2;
-      border.position.y = 0.1;
-      border.name = 'border';
-      userLocationGroup.add(border);
+  // --- White border ring around dot ---
+  const borderGeom = new THREE.RingGeometry(0.55, 0.75, 24);
+  const borderMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.9,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    depthTest: false
+  });
+  const border = new THREE.Mesh(borderGeom, borderMat);
+  border.rotation.x = -Math.PI / 2;
+  border.position.y = 0.1;
+  border.name = 'border';
+  border.renderOrder = 6;
+  userLocationGroup.add(border);
 
-      // --- Direction arrow (cone pointing North by default) ---
-      // The cone tip points along +Y axis; we'll rotate the group in Y to match heading.
-      const arrowGroup = new THREE.Group();
-      arrowGroup.name = 'arrowGroup';
+  // --- Direction arrow (cone pointing North by default) ---
+  const arrowGroup = new THREE.Group();
+  arrowGroup.name = 'arrowGroup';
 
-      // Cone body (the arrowhead)
-      const coneGeom = new THREE.ConeGeometry(0.55, 2.2, 8);
-      const coneMat = new THREE.MeshBasicMaterial({ color: 0x3498db });
-      const cone = new THREE.Mesh(coneGeom, coneMat);
-      // Place the cone so its base is near the dot and its tip points "forward"
-      // Forward = -Z in Three.js = North geographically (before rotation)
-      cone.rotation.x = Math.PI / 2;         // tip now points along -Z (North)
-      cone.position.set(0, 0.9, -1.4);       // offset forward from dot center
-      cone.name = 'cone';
-      arrowGroup.add(cone);
+  // Cone body (the arrowhead)
+  const coneGeom = new THREE.ConeGeometry(0.55, 2.2, 8);
+  const coneMat = new THREE.MeshBasicMaterial({ color: 0x3498db });
+  const cone = new THREE.Mesh(coneGeom, coneMat);
+  cone.rotation.x = Math.PI / 2;         // Tip points along -Z (North)
+  cone.position.set(0, 0.9, -1.4);       // Offset forward from dot center
+  cone.name = 'cone';
+  cone.renderOrder = 7;
+  arrowGroup.add(cone);
 
-      // White outline cone (slightly larger, behind)
-      const outlineConeGeom = new THREE.ConeGeometry(0.68, 2.4, 8);
-      const outlineConeMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.6
-      });
-      const outlineCone = new THREE.Mesh(outlineConeGeom, outlineConeMat);
-      outlineCone.rotation.x = Math.PI / 2;
-      outlineCone.position.set(0, 0.85, -1.4);
-      outlineCone.renderOrder = -1;
-      arrowGroup.add(outlineCone);
+  // White outline cone (slightly larger, behind)
+  const outlineConeGeom = new THREE.ConeGeometry(0.68, 2.4, 8);
+  const outlineConeMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.6
+  });
+  const outlineCone = new THREE.Mesh(outlineConeGeom, outlineConeMat);
+  outlineCone.rotation.x = Math.PI / 2;
+  outlineCone.position.set(0, 0.85, -1.4);
+  outlineCone.renderOrder = 6;
+  arrowGroup.add(outlineCone);
 
-      userLocationGroup.add(arrowGroup);
-    }
+  userLocationGroup.add(arrowGroup);
+}
 
     function updateUserMarkerHeading(headingDeg) {
       if (!userLocationGroup) return;
@@ -2308,19 +2311,26 @@
     }
 
     function placeUserMarker(lat, lon, accuracyM) {
-      buildUserLocationMarker();
-      const { x, z } = gpsToScene(lat, lon);
-      const y = getTerrainHeight(x, z) + 0.15; // sit slightly above terrain
-      userLocationGroup.position.set(x, y, z);
-      userLocationGroup.visible = true;
+  buildUserLocationMarker();
 
-      // Scale accuracy ring to match GPS accuracy radius
-      const accuracySceneRadius = Math.max(1.0, Math.min(accuracyM * SCALE * 2, 20.0));
-      const ring = userLocationGroup.getObjectByName('accuracyRing');
-      if (ring) ring.scale.setScalar(accuracySceneRadius);
+  const { x, z } = gpsToScene(lat, lon);
+  // Raised offset slightly (0.5) to clear terrain peaks/bumps
+  const y = getTerrainHeight(x, z) + 0.5;
 
-      requestRender();
-    }
+  userLocationGroup.position.set(x, y, z);
+  userLocationGroup.visible = true;
+
+  // Scale accuracy ring specifically (without scaling parent or children)
+  const accuracySceneRadius = Math.max(1.0, Math.min(accuracyM * SCALE * 2, 20.0));
+  const ring = userLocationGroup.getObjectByName('accuracyRing');
+  
+  if (ring) {
+    // ring is rotated on X, so scale X and Y for planar radius expansion
+    ring.scale.set(accuracySceneRadius, accuracySceneRadius, 1);
+  }
+
+  requestRender();
+}
 
     function setGpsStatus(state, text) {
       const el = document.getElementById('gps-status');
