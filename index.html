@@ -1665,50 +1665,74 @@
     // =========================================================================
     // 6. Camera Presets & Fly-To Controller
     // =========================================================================
-    function setCameraView(preset, animateCam = true) {
-      let camPos, targetLook;
+    // Reusable vectors declared at the top scope (outside any functions)
+const animStartCameraPos = new THREE.Vector3();
+const animStartLookAt = new THREE.Vector3();
+let animStartTime = 0;
+let animDuration = 1000; // Duration in milliseconds (1.0 sec)
 
-      if (preset === 'overview') {
-        camPos = new THREE.Vector3(0, 360, 520);
-        targetLook = new THREE.Vector3(0, 0, 40);
-      } else if (preset === 'portlouis') {
-        camPos = new THREE.Vector3(0, 120, -180);
-        targetLook = new THREE.Vector3(0, 15, -70);
-      } else if (preset === 'southwest') {
-        camPos = new THREE.Vector3(-140, 140, 260);
-        targetLook = new THREE.Vector3(-90, 15, 140);
-      } else if (preset === 'topdown') {
-        camPos = new THREE.Vector3(0, 680, 1);
-        targetLook = new THREE.Vector3(0, 0, 0);
-      }
+function setCameraView(preset, animateCam = true) {
+  let camPos, targetLook;
 
-      if (animateCam) {
-        targetCameraPos = camPos;
-        targetLookAt = targetLook;
-        isAnimatingCamera = true;
-      } else {
-        camera.position.copy(camPos);
-        controls.target.copy(targetLook);
-        controls.update();
-      }
-      labelVisibilityDirty = true;
-      requestRender();
-    }
+  if (preset === 'overview') {
+    camPos = new THREE.Vector3(0, 360, 520);
+    targetLook = new THREE.Vector3(0, 0, 40);
+  } else if (preset === 'portlouis') {
+    camPos = new THREE.Vector3(0, 120, -180);
+    targetLook = new THREE.Vector3(0, 15, -70);
+  } else if (preset === 'southwest') {
+    camPos = new THREE.Vector3(-140, 140, 260);
+    targetLook = new THREE.Vector3(-90, 15, 140);
+  } else if (preset === 'topdown') {
+    camPos = new THREE.Vector3(0, 680, 1);
+    targetLook = new THREE.Vector3(0, 0, 0);
+  }
 
-    function flyToPeak(index) {
-      const peak = PEAKS[index];
-      const px = peak.x * SCALE;
-      const pz = peak.z * SCALE;
-      const py = peak.elev * SCALE * zExaggeration;
+  if (!camPos || !targetLook) return; // Guard against unknown presets
 
-      targetCameraPos = new THREE.Vector3(px - 32, py + 26, pz + 42);
-      targetLookAt = new THREE.Vector3(px, py, pz);
-      isAnimatingCamera = true;
+  if (animateCam) {
+    // Record current camera/controls position as start point
+    animStartCameraPos.copy(camera.position);
+    animStartLookAt.copy(controls.target);
 
-      selectPeak(index);
-      labelVisibilityDirty = true;
-      requestRender();
-    }
+    targetCameraPos = camPos;
+    targetLookAt = targetLook;
+
+    animStartTime = performance.now();
+    animDuration = 1000; // 1.0 second animation
+    isAnimatingCamera = true;
+  } else {
+    isAnimatingCamera = false;
+    camera.position.copy(camPos);
+    controls.target.copy(targetLook);
+    controls.update();
+  }
+
+  labelVisibilityDirty = true;
+  requestRender();
+}
+
+function flyToPeak(index) {
+  const peak = PEAKS[index];
+  const px = peak.x * SCALE;
+  const pz = peak.z * SCALE;
+  const py = peak.elev * SCALE * zExaggeration;
+
+  // Record current camera/controls position as start point
+  animStartCameraPos.copy(camera.position);
+  animStartLookAt.copy(controls.target);
+
+  targetCameraPos = new THREE.Vector3(px - 32, py + 26, pz + 42);
+  targetLookAt = new THREE.Vector3(px, py, pz);
+
+  animStartTime = performance.now();
+  animDuration = 1200; // 1.2 second flight for peak focus
+  isAnimatingCamera = true;
+
+  selectPeak(index);
+  labelVisibilityDirty = true;
+  requestRender();
+}
 
     // =========================================================================
     // 7. Raycasting & Peak Selection
@@ -2049,17 +2073,31 @@
 
       // Camera Fly-To Interpolation
       if (isAnimatingCamera && targetCameraPos && targetLookAt) {
-        camera.position.lerp(targetCameraPos, 0.085);
-        controls.target.lerp(targetLookAt, 0.085);
-        labelVisibilityDirty = true;
-        requestRender();
+  const elapsed = performance.now() - animStartTime;
+  const progress = Math.min(Math.max(elapsed / animDuration, 0), 1.0);
 
-        if (camera.position.distanceTo(targetCameraPos) < 0.35) {
-          isAnimatingCamera = false;
-          targetCameraPos = null;
-          targetLookAt = null;
-        }
-      }
+  // Smooth ease-out cubic curve (decelerates naturally without infinite tail)
+  const easeProgress = 1 - Math.pow(1 - progress, 3);
+
+  // Interpolate from start vector to target vector
+  camera.position.lerpVectors(animStartCameraPos, targetCameraPos, easeProgress);
+  controls.target.lerpVectors(animStartLookAt, targetLookAt, easeProgress);
+
+  labelVisibilityDirty = true;
+
+  if (progress < 1.0) {
+    // Keep requesting frames until duration finishes
+    requestRender();
+  } else {
+    // Snap to exact target position at the end
+    camera.position.copy(targetCameraPos);
+    controls.target.copy(targetLookAt);
+
+    isAnimatingCamera = false;
+    targetCameraPos = null;
+    targetLookAt = null;
+  }
+}
 
       // OrbitControls damping updates
       const controlsChanged = controls.update();
