@@ -987,7 +987,7 @@
 
   <!-- My Location Button -->
   <button class="locate-btn" id="locate-btn" onclick="toggleUserLocation()">
-    📍 <span>My Location</span>
+    📍 <span id="locate-btn-text">My Location</span>
   </button>
 
   <!-- GPS Status Pill -->
@@ -2003,6 +2003,7 @@
       if (controlsChanged) {
         labelVisibilityDirty = true;
       }
+      updateUserMarkerScale();
 
       // Reactive Peak Labels Occlusion & Visibility Update
       if (labelVisibilityDirty && peakLabels.length) {
@@ -2204,6 +2205,8 @@
     let userLocationActive = false;
     let geoWatchId = null;
     let orientationHandler = null;
+    let userAccuracySceneRadius = 1;
+    let hasAutoZoomedToUserLocation = false;
 
     // Current user heading (degrees, 0=North, clockwise)
     let userHeadingDeg = 0;
@@ -2298,6 +2301,39 @@
       requestRender();
     }
 
+    // Keep the pin prominent from the island overview down to a close-up view,
+    // while leaving the accuracy ring in terrain units.
+    function updateUserMarkerScale() {
+      if (!userLocationGroup || !userLocationGroup.visible || !camera) return;
+
+      const distance = camera.position.distanceTo(userLocationGroup.position);
+      const markerScale = Math.max(1.8, Math.min(8.0, distance / 90));
+      const dot = userLocationGroup.getObjectByName('dot');
+      const border = userLocationGroup.getObjectByName('border');
+      const arrow = userLocationGroup.getObjectByName('arrowGroup');
+      const ring = userLocationGroup.getObjectByName('accuracyRing');
+
+      if (dot) dot.scale.setScalar(markerScale);
+      if (border) border.scale.set(markerScale, markerScale, 1);
+      if (arrow) arrow.scale.setScalar(markerScale);
+      if (ring) {
+        const ringRadius = Math.max(userAccuracySceneRadius, markerScale * 1.5);
+        ring.scale.set(ringRadius, ringRadius, 1);
+      }
+    }
+
+    function focusUserLocation() {
+      if (!userLocationGroup || !userLocationGroup.visible) return false;
+
+      const { x, y, z } = userLocationGroup.position;
+      targetCameraPos = new THREE.Vector3(x - 34, y + 42, z + 54);
+      targetLookAt = new THREE.Vector3(x, y, z);
+      isAnimatingCamera = true;
+      labelVisibilityDirty = true;
+      requestRender();
+      return true;
+    }
+
     function placeUserMarker(lat, lon, accuracyM) {
   buildUserLocationMarker();
 
@@ -2317,13 +2353,8 @@
   userLocationGroup.visible = true;
 
   // Scale accuracy ring specifically (without scaling parent or children)
-  const accuracySceneRadius = Math.max(1.0, Math.min(accuracyM * SCALE * 2, 20.0));
-  const ring = userLocationGroup.getObjectByName('accuracyRing');
-  
-  if (ring) {
-    // ring is rotated on X, so scale X and Y for planar radius expansion
-    ring.scale.set(accuracySceneRadius, accuracySceneRadius, 1);
-  }
+  userAccuracySceneRadius = Math.max(1.0, Math.min(accuracyM * SCALE * 2, 20.0));
+  updateUserMarkerScale();
 
   requestRender();
   return true;
@@ -2348,6 +2379,7 @@
       }
 
       document.getElementById('locate-btn').classList.add('active');
+      document.getElementById('locate-btn-text').textContent = 'Center on me';
       setGpsStatus('searching', 'Acquiring GPS…');
 
       // Geolocation watch
@@ -2358,6 +2390,10 @@
           const acc = pos.coords.accuracy || 20;
           if (placeUserMarker(lat, lon, acc)) {
             setGpsStatus('locked', `GPS locked · ±${Math.round(acc)}m`);
+            if (!hasAutoZoomedToUserLocation) {
+              hasAutoZoomedToUserLocation = true;
+              focusUserLocation();
+            }
           }
         },
         (err) => {
@@ -2403,6 +2439,7 @@
 
     function stopUserLocation() {
       document.getElementById('locate-btn').classList.remove('active');
+      document.getElementById('locate-btn-text').textContent = 'My Location';
       hideGpsStatus();
 
       if (geoWatchId != null) {
@@ -2418,14 +2455,15 @@
         userLocationGroup.visible = false;
         requestRender();
       }
+      hasAutoZoomedToUserLocation = false;
     }
 
     function toggleUserLocation() {
-      userLocationActive = !userLocationActive;
-      if (userLocationActive) {
+      if (!userLocationActive) {
+        userLocationActive = true;
         startUserLocation();
       } else {
-        stopUserLocation();
+        focusUserLocation();
       }
     }
     // Initialize when DOM ready
