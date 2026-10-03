@@ -726,10 +726,20 @@
       .inspector-card {
         left: 10px;
         right: 10px;
-        bottom: 10px;
+        /* Keep the selected-peak card above the map control toolbar. */
+        bottom: 132px;
         width: auto;
+        max-height: calc(100vh - 225px);
+        overflow-y: auto;
         border-radius: 18px;
         padding: 15px;
+      }
+
+      /* The drawer owns the bottom of the screen while it is open. */
+      .controls-panel.open ~ .toggle-panel-btn,
+      .controls-panel.open ~ .locate-btn,
+      .controls-panel.open ~ .gps-status {
+        display: none;
       }
 
       input[type="range"]::-webkit-slider-thumb {
@@ -852,6 +862,9 @@
       .gps-status {
         bottom: 54px;
         right: 14px;
+        max-width: calc(100vw - 28px);
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .locate-focus-btn {
         bottom: 58px;
@@ -2227,11 +2240,12 @@
     let userLocationActive = false;
     let geoWatchId = null;
     let orientationHandler = null;
+    let orientationSource = null;
     let userAccuracySceneRadius = 1;
     let hasAutoZoomedToUserLocation = false;
 
     // Current user heading (degrees, 0=North, clockwise)
-    let userHeadingDeg = 0;
+    let userHeadingDeg = null;
 
     function buildUserLocationMarker() {
   if (userLocationGroup) return; // Already built
@@ -2297,29 +2311,26 @@
   cone.renderOrder = 7;
   arrowGroup.add(cone);
 
-  // White outline cone (slightly larger, behind)
-  const outlineConeGeom = new THREE.ConeGeometry(0.68, 2.4, 8);
-  const outlineConeMat = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.6
-  });
-  const outlineCone = new THREE.Mesh(outlineConeGeom, outlineConeMat);
-  outlineCone.rotation.x = Math.PI / 2;
-  outlineCone.position.set(0, 0.85, -1.4);
-  outlineCone.renderOrder = 6;
-  arrowGroup.add(outlineCone);
-
   userLocationGroup.add(arrowGroup);
 }
 
     function updateUserMarkerHeading(headingDeg) {
-      if (!userLocationGroup) return;
-      userHeadingDeg = headingDeg;
+      if (!userLocationGroup || !Number.isFinite(headingDeg)) return;
+      const normalizedHeading = (headingDeg % 360 + 360) % 360;
+
+      // Device compass readings are noisy. Smooth across the 0°/360° boundary
+      // and ignore tiny sensor changes so the arrow remains steady.
+      if (userHeadingDeg === null) {
+        userHeadingDeg = normalizedHeading;
+      } else {
+        const delta = ((normalizedHeading - userHeadingDeg + 540) % 360) - 180;
+        if (Math.abs(delta) < 1.5) return;
+        userHeadingDeg = (userHeadingDeg + delta * 0.22 + 360) % 360;
+      }
       // In Three.js, +X = East, -Z = North.
       // A heading of 0° = North = -Z. Rotation around Y is clockwise when viewed top-down.
       // THREE.js Y rotation is CCW, so we negate the heading.
-      userLocationGroup.rotation.y = -headingDeg * Math.PI / 180;
+      userLocationGroup.rotation.y = -userHeadingDeg * Math.PI / 180;
       requestRender();
     }
 
@@ -2432,6 +2443,9 @@
       // iOS 13+ requires permission; we request it if available.
       function attachOrientation() {
         orientationHandler = (e) => {
+          // Some browsers emit both event types with different calibration.
+          // Keep the first usable stream instead of alternating between them.
+          if (orientationSource && e.type !== orientationSource) return;
           let heading = null;
           // webkitCompassHeading is iOS-specific (0–360, true north)
           if (e.webkitCompassHeading != null) {
@@ -2441,6 +2455,7 @@
             heading = (360 - e.alpha) % 360;
           }
           if (heading != null) {
+            orientationSource = e.type;
             updateUserMarkerHeading(heading);
           }
         };
@@ -2473,6 +2488,8 @@
         window.removeEventListener('deviceorientation', orientationHandler, true);
         orientationHandler = null;
       }
+      orientationSource = null;
+      userHeadingDeg = null;
       if (userLocationGroup) {
         userLocationGroup.visible = false;
         requestRender();
