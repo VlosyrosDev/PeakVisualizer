@@ -781,6 +781,19 @@
       box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.35), 0 4px 20px rgba(0, 0, 0, 0.4);
     }
 
+    .locate-focus-btn {
+      bottom: 62px;
+      display: none;
+    }
+
+    .locate-focus-btn.visible {
+      display: flex;
+    }
+
+    .locate-focus-btn.visible ~ .gps-status {
+      bottom: 102px;
+    }
+
     /* GPS Status Pill */
     .gps-status {
       position: absolute;
@@ -839,6 +852,12 @@
       .gps-status {
         bottom: 54px;
         right: 14px;
+      }
+      .locate-focus-btn {
+        bottom: 58px;
+      }
+      .locate-focus-btn.visible ~ .gps-status {
+        bottom: 98px;
       }
     }
   </style>
@@ -987,7 +1006,10 @@
 
   <!-- My Location Button -->
   <button class="locate-btn" id="locate-btn" onclick="toggleUserLocation()">
-    📍 <span id="locate-btn-text">My Location</span>
+    📍 <span>My Location</span>
+  </button>
+  <button class="locate-btn locate-focus-btn" id="focus-location-btn" onclick="focusUserLocation()">
+    🎯 <span>Center on me</span>
   </button>
 
   <!-- GPS Status Pill -->
@@ -2030,9 +2052,9 @@
 
       if (controlsChanged || isAnimatingCamera || renderRequested) {
         renderer.render(scene, camera);
-        if (showLabels) {
-          labelRenderer.render(scene, camera);
-        }
+        // Always render the label layer so object visibility changes remove
+        // already-mounted CSS badges when labels are turned off.
+        labelRenderer.render(scene, camera);
         renderRequested = false;
       }
     }
@@ -2379,7 +2401,7 @@
       }
 
       document.getElementById('locate-btn').classList.add('active');
-      document.getElementById('locate-btn-text').textContent = 'Center on me';
+      document.getElementById('focus-location-btn').classList.add('visible');
       setGpsStatus('searching', 'Acquiring GPS…');
 
       // Geolocation watch
@@ -2439,7 +2461,7 @@
 
     function stopUserLocation() {
       document.getElementById('locate-btn').classList.remove('active');
-      document.getElementById('locate-btn-text').textContent = 'My Location';
+      document.getElementById('focus-location-btn').classList.remove('visible');
       hideGpsStatus();
 
       if (geoWatchId != null) {
@@ -2463,7 +2485,8 @@
         userLocationActive = true;
         startUserLocation();
       } else {
-        focusUserLocation();
+        userLocationActive = false;
+        stopUserLocation();
       }
     }
     // Initialize when DOM ready
