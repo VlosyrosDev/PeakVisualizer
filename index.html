@@ -590,7 +590,15 @@
       contain: layout style;
       backface-visibility: hidden;
       -webkit-backface-visibility: hidden;
+      appearance: none;
+      font-family: inherit;
+      line-height: normal;
+      text-align: center;
+      touch-action: manipulation;
     }
+
+    /* Keep the whole rectangle as the hit target, including its text. */
+    .peak-label-badge > span { pointer-events: none; }
 
     .peak-label-badge:hover, .peak-label-badge:focus-visible {
       border-color: #ffffff;
@@ -1167,6 +1175,8 @@
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       // Exposure adjusted for rich contrast (not washed out)
       renderer.toneMappingExposure = 0.88;
+      renderer.domElement.style.position = 'relative';
+      renderer.domElement.style.zIndex = '0';
       container.appendChild(renderer.domElement);
 
       // CSS2D Renderer for Peak Labels
@@ -1175,6 +1185,8 @@
       labelRenderer.domElement.style.position = 'absolute';
       labelRenderer.domElement.style.top = '0';
       labelRenderer.domElement.style.pointerEvents = 'none';
+      labelRenderer.domElement.style.zIndex = '2';
+      labelRenderer.domElement.id = 'peak-label-layer';
       container.appendChild(labelRenderer.domElement);
 
       // OrbitControls with smooth damping
@@ -1530,22 +1542,25 @@
       for (let i = 0; i < PEAKS.length; i++) {
         const peak = PEAKS[i];
         if (peak.isNamed) {
-          const div = document.createElement('div');
+          const div = document.createElement('button');
+          div.type = 'button';
+          div.style.pointerEvents = 'auto';
           div.className = 'peak-label-badge';
           div.dataset.peakIndex = i;
           div.setAttribute('role', 'button');
           div.setAttribute('aria-label', `Select ${peak.name}`);
           div.tabIndex = 0;
+          // Label gestures must never reach map navigation/raycast handlers.
+          for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'dblclick']) {
+            div.addEventListener(type, e => e.stopPropagation());
+          }
           div.addEventListener('click', e => {
+            e.preventDefault();
             e.stopPropagation();
             selectPeak(i);
           });
           div.addEventListener('keydown', e => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              e.stopPropagation();
-              selectPeak(i);
-            }
+            if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
           });
           div.innerHTML = `<span>${peak.name}</span><span class="elev-tag">${Math.round(peak.elev)}m</span>`;
 
@@ -1651,12 +1666,12 @@
         // 1. Elevation and prominence check (selected peak bypasses this check)
         // Only completed-only browsing uses camera-to-summit distance.
         // Show these two badges in the opening/island view, but hide them
-        // beyond 1000 scene units. Normal peak LOD stays unchanged.
+        // beyond 1800 scene units. Normal peak LOD stays unchanged.
         const completedLabel = showCompletedOnly && isVlosyrosPeak(peak);
         const completedDistance = completedLabel
           ? Math.hypot(cx - px, cy - py, cz - pz) : 0;
         const isProminent = completedLabel
-          ? (isSelected || completedDistance < 1000)
+          ? (isSelected || completedDistance < 1800)
           : ((peak.elev >= distThreshold) || (currentMinElev > 0) || isSelected || camDist < 340);
         if (!isSelected && (peak.elev < currentMinElev || !isProminent)) {
           item.obj.visible = false;
