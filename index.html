@@ -1610,7 +1610,12 @@
         const py = peak.elev * SCALE * zExaggeration;
 
         // 1. Elevation and prominence check (selected peak bypasses this check)
-        const isProminent = (peak.elev >= distThreshold) || (currentMinElev > 0) || isSelected || (camDist < 340);
+        // Completed-only browsing gets a modestly wider range, with a firm
+        // zoom cutoff even when an elevation filter is also active.
+        const completedLabel = showCompletedOnly && isVlosyrosPeak(peak);
+        const isProminent = completedLabel
+          ? (isSelected || camDist < 460)
+          : ((peak.elev >= distThreshold) || (currentMinElev > 0) || isSelected || camDist < 340);
         if (!isSelected && (peak.elev < currentMinElev || !isProminent)) {
           item.obj.visible = false;
           continue;
@@ -1848,7 +1853,14 @@ function flyToPeak(index) {
       const urlBtn = document.getElementById('insp-url-btn');
       if (peak.url) {
         urlBtn.style.display = 'flex';
-        urlBtn.href = peak.url;
+        // Keep the two completed trail pages on the current site/origin.
+        // Leave all other More Info destinations exactly as provided.
+        const completedPaths = {
+          'https://vlosyros.dev/PeakVisualizer/chapmanhill/': './chapmanhill/',
+          'https://vlosyros.dev/PeakVisualizer/signaux/': './signaux/'
+        };
+        urlBtn.href = isVlosyrosPeak(peak) && completedPaths[peak.url]
+          ? completedPaths[peak.url] : peak.url;
       } else {
         urlBtn.style.display = 'none';
       }
