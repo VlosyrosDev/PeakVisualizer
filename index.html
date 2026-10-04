@@ -963,6 +963,14 @@
       <div class="chip" onclick="applyQuickFilter('top10', this)">Top 10</div>
     </div>
 
+    <label class="toggle-row">
+      <span>Completed peaks only</span>
+      <div class="switch">
+        <input type="checkbox" id="toggle-completed" />
+        <span class="slider-round"></span>
+      </div>
+    </label>
+
     <!-- Camera Views: placed early so it remains clear of mobile map controls -->
     <div class="section-title">Camera Views</div>
     <div class="preset-grid">
@@ -971,6 +979,8 @@
       <button class="preset-btn" onclick="setCameraView('southwest')">⛰️ Black River Gorges</button>
       <button class="preset-btn" onclick="setCameraView('topdown')">🗺️ Top-Down Map</button>
     </div>
+
+    <button class="preset-btn" id="reset-settings-btn" onclick="resetMapSettings()" style="width:100%; margin-top:12px;">↺ Reset map & settings</button>
 
     <!-- Sliders -->
     <div class="section-title">Elevation & Relief Controls</div>
@@ -1112,8 +1122,6 @@
     let isAnimatingCamera = false;
     let renderRequested = true;
     let labelVisibilityDirty = true;
-    let lastCamX = null, lastCamY = null, lastCamZ = null;
-    let lastTargetX = null, lastTargetY = null, lastTargetZ = null;
 
     // Preallocated math objects (zero GC in render loop)
     const _viewMatrix = new THREE.Matrix4();
@@ -1216,6 +1224,12 @@
 
       // Keyboard navigation
       window.addEventListener('keydown', onKeyDown, false);
+      window.addEventListener('keyup', e => pressedKeys.delete(e.key.toLowerCase()));
+      window.addEventListener('blur', () => pressedKeys.clear());
+      document.addEventListener('visibilitychange', () => pressedKeys.clear());
+      document.addEventListener('focusin', e => {
+        if (e.target.closest('input, textarea, select, [contenteditable]')) pressedKeys.clear();
+      });
 
       // Desktop starts open, Mobile starts collapsed
       if (!isMobile) {
@@ -1513,13 +1527,24 @@
     let currentMinElev = 0;
     let showNamedOnly = false;
     let showLabels = true;
+    let showCompletedOnly = false;
+
+    function peakMatchesFilters(peak) {
+      return peak.elev >= currentMinElev && (!showNamedOnly || peak.isNamed) &&
+        (!showCompletedOnly || isVlosyrosPeak(peak));
+    }
 
     function updatePeakDisplay() {
       let visibleCount = 0;
+      if (selectedPeakIndex >= 0 && !peakMatchesFilters(PEAKS[selectedPeakIndex])) {
+        selectedPeakIndex = -1;
+        selectedMarkerMesh.visible = false;
+        document.getElementById('inspector-card').style.display = 'none';
+      }
 
       for (let i = 0; i < PEAKS.length; i++) {
         const peak = PEAKS[i];
-        const isVisible = (peak.elev >= currentMinElev) && (!showNamedOnly || peak.isNamed);
+        const isVisible = peakMatchesFilters(peak);
 
         dummy.position.set(peak.x * SCALE, peak.elev * SCALE * zExaggeration, peak.z * SCALE);
         if (isVisible) visibleCount++;
@@ -1556,6 +1581,7 @@
       const isMobile = window.innerWidth < 768;
       const distThreshold = isMobile ? 620 : 540;
 
+      camera.updateMatrixWorld();
       // Projective view matrix for frustum culling
       _viewMatrix.copy(camera.matrixWorldInverse);
       _projViewMatrix.multiplyMatrices(camera.projectionMatrix, _viewMatrix);
@@ -1575,6 +1601,10 @@
         item.div.classList.toggle('selected', isSelected);
 
         const peak = PEAKS[item.index];
+        if (!peakMatchesFilters(peak)) {
+          item.obj.visible = false;
+          continue;
+        }
         const px = item.wx;
         const pz = item.wz;
         const py = peak.elev * SCALE * zExaggeration;
@@ -1772,7 +1802,7 @@ function flyToPeak(index) {
         const instanceId = intersects[0].instanceId;
         if (instanceId !== undefined && instanceId >= 0) {
           const peak = PEAKS[instanceId];
-          if ((peak.elev >= currentMinElev) && (!showNamedOnly || peak.isNamed)) {
+          if (peakMatchesFilters(peak)) {
             const px = peak.x * SCALE;
             const py = peak.elev * SCALE * zExaggeration;
             const pz = peak.z * SCALE;
@@ -1922,6 +1952,39 @@ function flyToPeak(index) {
       trackAnalyticsEvent('toggle_named', { enabled: showNamedOnly });
     });
 
+    document.getElementById('toggle-completed').addEventListener('change', e => {
+      showCompletedOnly = e.target.checked;
+      updatePeakDisplay();
+    });
+
+    function resetMapSettings() {
+      pressedKeys.clear();
+      userLocationActive = false;
+      stopUserLocation();
+      closeInspector();
+      searchInput.value = '';
+      searchResults.style.display = 'none';
+      showCompletedOnly = false;
+      showLabels = true;
+      document.getElementById('toggle-completed').checked = false;
+      document.getElementById('toggle-labels').checked = true;
+      applyQuickFilter('all', document.querySelector('.chip'));
+      zSlider.value = zSlider.defaultValue;
+      updateZExaggeration(Number(zSlider.value));
+      contrastSlider.value = contrastSlider.defaultValue;
+      updateReliefContrast(Number(contrastSlider.value));
+      markerSlider.value = markerSlider.defaultValue;
+      markerScale = Number(markerSlider.value) / 100;
+      document.getElementById('marker-size-val').textContent = markerSlider.value + '%';
+      updateSelectedMarkerHighlight();
+      updatePeakDisplay();
+      // Flush pending orbit damping before restoring the opening view.
+      controls.enableDamping = false;
+      controls.update();
+      controls.enableDamping = true;
+      setCameraView('overview', false);
+    }
+
     document.getElementById('toggle-labels').addEventListener('change', (e) => {
       showLabels = e.target.checked;
       updatePeakDisplay();
@@ -1978,71 +2041,43 @@ function flyToPeak(index) {
     // =========================================================================
     // 10. Keyboard Flight Navigation (matching 3d.py)
     // =========================================================================
-    function onKeyDown(e) {
-      if (e.target.tagName === 'INPUT') return;
+    const pressedKeys = new Set();
+    const flightKeys = new Set(['w', 'a', 's', 'd', 'q', 'e',
+      'arrowup', 'arrowdown', 'arrowleft', 'arrowright']);
+    const flightDirection = new THREE.Vector3();
+    let lastFrameTime = performance.now();
 
+    function onKeyDown(e) {
+      if (e.target.closest('input, textarea, select, [contenteditable]') ||
+          e.ctrlKey || e.metaKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'escape' && selectedPeakIndex >= 0) closeInspector();
+      if (!flightKeys.has(key)) return;
+      e.preventDefault();
+      pressedKeys.add(key);
+      isAnimatingCamera = false;
+      targetCameraPos = targetLookAt = null;
+    }
+
+    function updateKeyboardFlight(dt) {
+      if (!pressedKeys.size) return;
+      const held = (...keys) => keys.some(key => pressedKeys.has(key)) ? 1 : 0;
       camera.getWorldDirection(_forwardVec);
       _forwardVec.y = 0;
       _forwardVec.normalize();
-
       _rightVec.crossVectors(_forwardVec, camera.up).normalize();
-      const step = Math.max(camera.position.y * 0.12, 10.0);
-
-      switch (e.key) {
-        case 'Escape':
-          if (selectedPeakIndex >= 0) {
-            closeInspector();
-          }
-          break;
-        case 'ArrowUp':
-        case 'w':
-        case 'W':
-          camera.position.addScaledVector(_forwardVec, step);
-          controls.target.addScaledVector(_forwardVec, step);
-          labelVisibilityDirty = true;
-          requestRender();
-          break;
-        case 'ArrowDown':
-        case 's':
-        case 'S':
-          camera.position.addScaledVector(_forwardVec, -step);
-          controls.target.addScaledVector(_forwardVec, -step);
-          labelVisibilityDirty = true;
-          requestRender();
-          break;
-        case 'ArrowLeft':
-        case 'a':
-        case 'A':
-          camera.position.addScaledVector(_rightVec, -step);
-          controls.target.addScaledVector(_rightVec, -step);
-          labelVisibilityDirty = true;
-          requestRender();
-          break;
-        case 'ArrowRight':
-        case 'd':
-        case 'D':
-          camera.position.addScaledVector(_rightVec, step);
-          controls.target.addScaledVector(_rightVec, step);
-          labelVisibilityDirty = true;
-          requestRender();
-          break;
-        case 'e':
-        case 'E':
-          camera.position.y += step;
-          controls.target.y += step;
-          labelVisibilityDirty = true;
-          requestRender();
-          break;
-        case 'q':
-        case 'Q':
-          if (camera.position.y - step > 5.0) {
-            camera.position.y -= step;
-            controls.target.y -= step;
-            labelVisibilityDirty = true;
-            requestRender();
-          }
-          break;
-      }
+      flightDirection.copy(_forwardVec).multiplyScalar(
+        held('w', 'arrowup') - held('s', 'arrowdown'));
+      flightDirection.addScaledVector(_rightVec,
+        held('d', 'arrowright') - held('a', 'arrowleft'));
+      flightDirection.y = held('e') - held('q');
+      if (!flightDirection.lengthSq()) return;
+      flightDirection.normalize().multiplyScalar(Math.max(camera.position.y * 1.2, 100) * dt);
+      flightDirection.y = Math.max(flightDirection.y, 5 - camera.position.y);
+      camera.position.add(flightDirection);
+      controls.target.add(flightDirection);
+      labelVisibilityDirty = true;
+      requestRender();
     }
 
     function onWindowResize() {
@@ -2064,6 +2099,10 @@ function flyToPeak(index) {
     // =========================================================================
     function animate() {
       requestAnimationFrame(animate);
+      const now = performance.now();
+      const dt = Math.min((now - lastFrameTime) / 1000, 0.05);
+      lastFrameTime = now;
+      updateKeyboardFlight(dt);
 
       // Camera Fly-To Interpolation
       if (isAnimatingCamera && targetCameraPos && targetLookAt) {
@@ -2104,24 +2143,7 @@ function flyToPeak(index) {
 
       // Reactive Peak Labels Occlusion & Visibility Update
       if (labelVisibilityDirty && peakLabels.length) {
-        const cx = camera.position.x;
-        const cy = camera.position.y;
-        const cz = camera.position.z;
-        const tx = controls.target.x;
-        const ty = controls.target.y;
-        const tz = controls.target.z;
-
-        if (lastCamX === null ||
-            Math.abs(cx - lastCamX) > 0.03 ||
-            Math.abs(cy - lastCamY) > 0.03 ||
-            Math.abs(cz - lastCamZ) > 0.03 ||
-            Math.abs(tx - lastTargetX) > 0.03 ||
-            Math.abs(ty - lastTargetY) > 0.03 ||
-            Math.abs(tz - lastTargetZ) > 0.03) {
-          lastCamX = cx; lastCamY = cy; lastCamZ = cz;
-          lastTargetX = tx; lastTargetY = ty; lastTargetZ = tz;
-          updatePeakLabelsVisibility();
-        }
+        updatePeakLabelsVisibility();
         labelVisibilityDirty = false;
       }
 
@@ -2420,6 +2442,10 @@ function flyToPeak(index) {
     function focusUserLocation() {
   if (!userLocationGroup || !userLocationGroup.visible) return false;
 
+  animStartCameraPos.copy(camera.position);
+  animStartLookAt.copy(controls.target);
+  animStartTime = performance.now();
+  animDuration = 1000;
   const { x, y, z } = userLocationGroup.position;
   targetLookAt = new THREE.Vector3(x, y, z);
 
