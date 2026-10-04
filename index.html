@@ -979,7 +979,7 @@
     </div>
 
     <label class="toggle-row">
-      <span>Completed peaks only</span>
+      <span>Charted peaks only</span>
       <div class="switch">
         <input type="checkbox" id="toggle-completed" />
         <span class="slider-round"></span>
@@ -1761,6 +1761,87 @@ const animStartCameraPos = new THREE.Vector3();
 const animStartLookAt = new THREE.Vector3();
 let animStartTime = 0;
 let animDuration = 1000; // Duration in milliseconds (1.0 sec)
+let isPresetFlight = false;
+let presetControlsEnabled = true;
+const presetStartOrbit = new THREE.Spherical();
+const presetEndOrbit = new THREE.Spherical();
+const presetOrbit = new THREE.Spherical();
+const presetOffset = new THREE.Vector3();
+const presetUpToY = new THREE.Quaternion();
+const presetYToUp = new THREE.Quaternion();
+const presetUpAxis = new THREE.Vector3(0, 1, 0);
+let presetAzimuthDelta = 0;
+
+function cancelPresetFlight() {
+  if (isPresetFlight) controls.enabled = presetControlsEnabled;
+  isPresetFlight = false;
+}
+
+function startPresetFlight(camPos, targetLook) {
+  cancelPresetFlight();
+  // Clear old orbit/pan damping without moving the visible starting pose.
+  animStartCameraPos.copy(camera.position);
+  animStartLookAt.copy(controls.target);
+  const damping = controls.enableDamping;
+  controls.enableDamping = false;
+  controls.update();
+  camera.position.copy(animStartCameraPos);
+  controls.target.copy(animStartLookAt);
+  controls.enableDamping = damping;
+  controls.update();
+
+  presetUpToY.setFromUnitVectors(camera.up, presetUpAxis);
+  presetYToUp.copy(presetUpToY).invert();
+  presetStartOrbit.setFromVector3(presetOffset.copy(camera.position)
+    .sub(controls.target).applyQuaternion(presetUpToY));
+  presetEndOrbit.setFromVector3(presetOffset.copy(camPos)
+    .sub(targetLook).applyQuaternion(presetUpToY));
+  // Match the final pose OrbitControls would accept, before animation starts.
+  presetEndOrbit.radius = THREE.MathUtils.clamp(presetEndOrbit.radius,
+    controls.minDistance, controls.maxDistance);
+  presetEndOrbit.phi = THREE.MathUtils.clamp(presetEndOrbit.phi,
+    controls.minPolarAngle, controls.maxPolarAngle);
+  presetEndOrbit.makeSafe();
+  const thetaDelta = presetEndOrbit.theta - presetStartOrbit.theta;
+  presetAzimuthDelta = Math.atan2(Math.sin(thetaDelta), Math.cos(thetaDelta));
+  targetLookAt = targetLook;
+  targetCameraPos = presetOffset.setFromSpherical(presetEndOrbit)
+    .applyQuaternion(presetYToUp).add(targetLook).clone();
+  animStartTime = performance.now();
+  animDuration = 1000;
+  presetControlsEnabled = controls.enabled;
+  controls.enabled = false;
+  isPresetFlight = true;
+  isAnimatingCamera = true;
+}
+
+function updateCameraAnimation(now) {
+  if (!isAnimatingCamera || !targetCameraPos || !targetLookAt) return;
+  const progress = THREE.MathUtils.clamp((now - animStartTime) / animDuration, 0, 1);
+  const easeProgress = 1 - Math.pow(1 - progress, 3);
+  controls.target.lerpVectors(animStartLookAt, targetLookAt, easeProgress);
+  if (isPresetFlight) {
+    // Stay in OrbitControls' coordinate system: never cross the look-at pole
+    // or switch orientation rules on the final frame.
+    presetOrbit.radius = THREE.MathUtils.lerp(presetStartOrbit.radius, presetEndOrbit.radius, easeProgress);
+    presetOrbit.phi = THREE.MathUtils.lerp(presetStartOrbit.phi, presetEndOrbit.phi, easeProgress);
+    presetOrbit.theta = presetStartOrbit.theta + presetAzimuthDelta * easeProgress;
+    camera.position.copy(presetOffset.setFromSpherical(presetOrbit)
+      .applyQuaternion(presetYToUp)).add(controls.target);
+    camera.lookAt(controls.target);
+  } else {
+    // Keep existing peak/location flight paths.
+    camera.position.lerpVectors(animStartCameraPos, targetCameraPos, easeProgress);
+  }
+  labelVisibilityDirty = true;
+  requestRender();
+  if (progress === 1) {
+    isAnimatingCamera = false;
+    targetCameraPos = targetLookAt = null;
+    cancelPresetFlight();
+  }
+}
+
 
 function setCameraView(preset, animateCam = true) {
   let camPos, targetLook;
@@ -1782,18 +1863,11 @@ function setCameraView(preset, animateCam = true) {
   if (!camPos || !targetLook) return; // Guard against unknown presets
 
   if (animateCam) {
-    // Record current camera/controls position as start point
-    animStartCameraPos.copy(camera.position);
-    animStartLookAt.copy(controls.target);
-
-    targetCameraPos = camPos;
-    targetLookAt = targetLook;
-
-    animStartTime = performance.now();
-    animDuration = 1000; // 1.0 second animation
-    isAnimatingCamera = true;
+    startPresetFlight(camPos, targetLook);
   } else {
+    cancelPresetFlight();
     isAnimatingCamera = false;
+    targetCameraPos = targetLookAt = null;
     camera.position.copy(camPos);
     controls.target.copy(targetLook);
     controls.update();
@@ -1804,6 +1878,7 @@ function setCameraView(preset, animateCam = true) {
 }
 
 function flyToPeak(index) {
+  cancelPresetFlight();
   const peak = PEAKS[index];
   const px = peak.x * SCALE;
   const pz = peak.z * SCALE;
@@ -2117,6 +2192,7 @@ function flyToPeak(index) {
       if (!flightKeys.has(key)) return;
       e.preventDefault();
       pressedKeys.add(key);
+      cancelPresetFlight();
       isAnimatingCamera = false;
       targetCameraPos = targetLookAt = null;
     }
@@ -2166,38 +2242,11 @@ function flyToPeak(index) {
       lastFrameTime = now;
       updateKeyboardFlight(dt);
 
-      // Camera Fly-To Interpolation
-      if (isAnimatingCamera && targetCameraPos && targetLookAt) {
-  const elapsed = performance.now() - animStartTime;
-  const progress = Math.min(Math.max(elapsed / animDuration, 0), 1.0);
+      updateCameraAnimation(now);
 
-  // Smooth ease-out cubic curve (decelerates naturally without infinite tail)
-  const easeProgress = 1 - Math.pow(1 - progress, 3);
-
-  // Interpolate from start vector to target vector
-  camera.position.lerpVectors(animStartCameraPos, targetCameraPos, easeProgress);
-  controls.target.lerpVectors(animStartLookAt, targetLookAt, easeProgress);
-
-  labelVisibilityDirty = true;
-
-  if (progress < 1.0) {
-    // Keep requesting frames until duration finishes
-    requestRender();
-  } else {
-    // Snap to exact target position at the end
-    camera.position.copy(targetCameraPos);
-    controls.target.copy(targetLookAt);
-
-    isAnimatingCamera = false;
-    targetCameraPos = null;
-    targetLookAt = null;
-    updatePeakLabelsVisibility()
-    requestRender();
-  }
-}
-
-      // OrbitControls damping updates
-      const controlsChanged = controls.update();
+      // Preset flight owns the orbit until its endpoint; controls resume with
+      // the same position, target, up vector and look-at orientation.
+      const controlsChanged = isPresetFlight ? false : controls.update();
       if (controlsChanged) {
         labelVisibilityDirty = true;
       }
@@ -2503,6 +2552,7 @@ function flyToPeak(index) {
 
     function focusUserLocation() {
   if (!userLocationGroup || !userLocationGroup.visible) return false;
+  cancelPresetFlight();
 
   animStartCameraPos.copy(camera.position);
   animStartLookAt.copy(controls.target);
