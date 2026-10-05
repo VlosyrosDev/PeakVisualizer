@@ -1,10 +1,11 @@
 """
 Build static web assets for Mauritius Peak Visualizer.
-Reprojects DEM and Satellite imagery to UTM EPSG:32740 (metric coordinates).
+Reprojects DEM and Satellite imagery to UTM EPSG:32740 (metric coordinates)
+at native full spatial resolution while preserving original JS data formats.
 Generates:
   1. texture.jpg         - High-res satellite drape in UTM coordinates
   2. texture_data.js     - Base64 data URI for zero-CORS file:// execution
-  3. data.js             - Terrain grid (elevation) + Peak coordinates & metadata
+  3. data.js             - High-res Terrain grid (Int16 decimeters) + Peak coordinates & metadata
 """
 
 import base64
@@ -27,27 +28,20 @@ SATELLITE_PATH = os.path.join(PROJECT_DIR, "imagery.tif")
 PEAKS_PATH = os.path.join(PROJECT_DIR, "mauritius_public_peaks_named.geojson")
 TARGET_CRS = "EPSG:32740"
 
-# Dimensions
-GRID_COLS = 300
-GRID_ROWS = 342
-TEX_WIDTH = 1561
-TEX_HEIGHT = 1779
-
 
 def main():
-    print("--- 1. Reprojecting DEM to UTM Zone 40S ---")
+    print("--- 1. Reprojecting DEM to UTM Zone 40S (Full Native Resolution) ---")
     with rasterio.open(DEM_PATH) as dem_src:
+        # Calculate native full-resolution output dimensions automatically
         transform, out_w, out_h = calculate_default_transform(
             dem_src.crs,
             TARGET_CRS,
             dem_src.width,
             dem_src.height,
             *dem_src.bounds,
-            dst_width=GRID_COLS,
-            dst_height=GRID_ROWS,
         )
 
-        elevation = np.empty((GRID_ROWS, GRID_COLS), dtype=np.float32)
+        elevation = np.empty((out_h, out_w), dtype=np.float32)
         reproject(
             source=rasterio.band(dem_src, 1),
             destination=elevation,
@@ -63,9 +57,11 @@ def main():
     max_elev = float(np.max(elevation))
     min_elev = float(np.min(elevation))
 
-    # Metric dimensions
-    world_width = abs(transform.a) * GRID_COLS
-    world_height = abs(transform.e) * GRID_ROWS
+    # Dynamic metric dimensions from native raster output
+    grid_cols = out_w
+    grid_rows = out_h
+    world_width = abs(transform.a) * grid_cols
+    world_height = abs(transform.e) * grid_rows
     x_min = transform.c
     x_max = transform.c + world_width
     y_max = transform.f
@@ -73,29 +69,28 @@ def main():
     center_x = (x_min + x_max) / 2.0
     center_y = (y_min + y_max) / 2.0
 
+    print(f"  Elevation Grid: {grid_cols} x {grid_rows} pixels")
     print(f"  Elevation: {min_elev:.1f}m to {max_elev:.1f}m")
     print(f"  World size: {world_width:.1f}m x {world_height:.1f}m ({world_width/1000:.1f}km x {world_height/1000:.1f}km)")
     print(f"  Center UTM: ({center_x:.1f}, {center_y:.1f})")
 
-    # Encode elevation as Int16 in decimeters (0.1m precision)
+    # Encode elevation as Int16 in decimeters (0.1m precision) expected by buildTerrain()
     elev_decimeters = np.round(elevation * 10.0).astype(np.int16)
     elev_bytes = elev_decimeters.tobytes()
     elev_b64 = base64.b64encode(elev_bytes).decode("ascii")
     print(f"  Elevation data base64 length: {len(elev_b64)} chars ({len(elev_b64)/1024:.1f} KB)")
 
-    print("\n--- 2. Reprojecting Satellite Imagery ---")
-    tex_transform, _, _ = calculate_default_transform(
-        dem_src.crs,
-        TARGET_CRS,
-        dem_src.width,
-        dem_src.height,
-        *dem_src.bounds,
-        dst_width=TEX_WIDTH,
-        dst_height=TEX_HEIGHT,
-    )
-
-    sat_rgb = np.empty((3, TEX_HEIGHT, TEX_WIDTH), dtype=np.uint8)
+    print("\n--- 2. Reprojecting Satellite Imagery (Full Native Resolution) ---")
     with rasterio.open(SATELLITE_PATH) as sat_src:
+        tex_transform, tex_w, tex_h = calculate_default_transform(
+            sat_src.crs,
+            TARGET_CRS,
+            sat_src.width,
+            sat_src.height,
+            *sat_src.bounds,
+        )
+
+        sat_rgb = np.empty((3, tex_h, tex_w), dtype=np.uint8)
         for band in range(1, 4):
             reproject(
                 source=rasterio.band(sat_src, band),
@@ -104,12 +99,13 @@ def main():
                 src_crs=sat_src.crs,
                 dst_transform=tex_transform,
                 dst_crs=TARGET_CRS,
-                resampling=Resampling.bilinear,
+                resampling=Resampling.lanczos,
             )
 
+    print(f"  Texture Resolution: {tex_w} x {tex_h} pixels")
     sat_image = Image.fromarray(np.transpose(sat_rgb, (1, 2, 0)), "RGB")
     tex_path = os.path.join(BASE_DIR, "texture.jpg")
-    sat_image.save(tex_path, format="JPEG", quality=82, optimize=True)
+    sat_image.save(tex_path, format="JPEG", quality=95, optimize=True)
     tex_size_kb = os.path.getsize(tex_path) / 1024.0
     print(f"  Saved {tex_path} ({tex_size_kb:.1f} KB)")
 
@@ -164,8 +160,8 @@ def main():
         "height": round(world_height, 1),
         "centerUtmX": round(center_x, 1),
         "centerUtmY": round(center_y, 1),
-        "cols": GRID_COLS,
-        "rows": GRID_ROWS,
+        "cols": grid_cols,
+        "rows": grid_rows,
         "minElev": round(min_elev, 1),
         "maxElev": round(max_elev, 1),
         "elevationBase64": elev_b64,
@@ -181,7 +177,7 @@ def main():
         f.write(";\n")
 
     print(f"  Saved {data_js_path} ({os.path.getsize(data_js_path)/1024:.1f} KB)")
-    print("\nAssets prepared successfully!")
+    print("\nAssets prepared successfully with full spatial resolution!")
 
 
 if __name__ == "__main__":
