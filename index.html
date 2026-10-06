@@ -919,8 +919,13 @@
   <script src="lib/OrbitControls.js"></script>
   <script src="lib/CSS2DRenderer.js"></script>
   <!-- Data assets -->
-  <script src="texture_data.js"></script>
-  <script src="data.js"></script>
+  <script>
+    // Decide once at load; resizing must not switch coordinates or data underneath the scene.
+    const MOBILE_QUALITY = matchMedia('(pointer: coarse)').matches || innerWidth < 768;
+    document.write('<script src="' + (MOBILE_QUALITY ? 'texture-mobile.js' : 'texture_data.js') + '"><\/script>');
+    document.write('<script src="' + (MOBILE_QUALITY ? 'data-mobile.js' : 'data.js') + '"><\/script>');
+  </script>
+  <script src="peaks.js"></script>
 
   <!-- GoatCounter Analytics (Private to vlosyros dashboard) -->
   <script data-goatcounter="https://vlosyros.goatcounter.com/count"
@@ -1017,7 +1022,7 @@
 
     <div class="slider-group">
       <div class="slider-label">
-        <span>Relief Outline & Contrast</span>
+        <span>Relief Strength</span>
         <span class="slider-value" id="contrast-val">75%</span>
       </div>
       <input type="range" id="contrast-slider" min="0" max="100" value="75" step="5" />
@@ -1153,6 +1158,20 @@
     }
 
     function initScene() {
+      // Only lat/lon are stored. Keep derived meters for all existing selection/filter code.
+      for (const [index, peak] of PEAKS.entries()) {
+        peak.id ??= index;
+        peak.name ||= "Unnamed Peak";
+        peak.isNamed ??= peak.name !== "Unnamed Peak";
+        peak.url ||= "";
+        if (!Number.isFinite(peak.lat) || !Number.isFinite(peak.lon) ||
+            peak.lat < -90 || peak.lat > 90 || peak.lon < -180 || peak.lon > 180) {
+          throw new Error('Invalid WGS84 coordinates for peak ' + peak.name);
+        }
+        const pos = gpsToScene(peak.lat, peak.lon);
+        peak.x = pos.x / SCALE;
+        peak.z = pos.z / SCALE;
+      }
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x04070d);
       scene.fog = new THREE.FogExp2(0x04070d, 0.00065);
@@ -1161,11 +1180,11 @@
       camera = new THREE.PerspectiveCamera(45, aspect, 1.0, 7000.0);
 
       // WebGL Renderer with performance-minded pixel ratio clamping and fast compositing
-      const isMobile = window.innerWidth < 768;
-      const maxDPR = isMobile ? 1.5 : 2.0;
+      const isMobile = MOBILE_QUALITY;
+      const maxDPR = isMobile ? 1.0 : 2.0;
 
       renderer = new THREE.WebGLRenderer({
-        antialias: true,
+        antialias: !MOBILE_QUALITY,
         alpha: false,
         powerPreference: "high-performance",
         stencil: false
@@ -1229,6 +1248,11 @@
 
       // Build 3D Terrain, Ocean, and Peaks
       buildTerrain();
+      for (const peak of PEAKS) {
+        if (!Number.isFinite(peak.elev)) {
+          peak.elev = getTerrainHeight(peak.x * SCALE, peak.z * SCALE) / (SCALE * zExaggeration);
+        }
+      }
       buildOcean();
       buildPeakInstancedMesh();
       buildPeakLabels();
@@ -1245,7 +1269,7 @@
       window.addEventListener('keydown', onKeyDown, false);
       window.addEventListener('keyup', e => pressedKeys.delete(e.key.toLowerCase()));
       window.addEventListener('blur', () => pressedKeys.clear());
-      document.addEventListener('visibilitychange', () => pressedKeys.clear());
+      document.addEventListener('visibilitychange', () => { pressedKeys.clear(); lastFrameTime = performance.now(); requestRender(); });
       document.addEventListener('focusin', e => {
         if (e.target.closest('input, textarea, select, [contenteditable]')) pressedKeys.clear();
       });
@@ -1312,13 +1336,12 @@
       satTexture.minFilter = THREE.LinearMipmapLinearFilter;
       satTexture.magFilter = THREE.LinearFilter;
       satTexture.generateMipmaps = true;
-      satTexture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 4);
+      satTexture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), MOBILE_QUALITY ? 1 : 4);
 
       // MeshStandardMaterial enhanced with custom GLSL for dark mountain relief outlines
-      const material = new THREE.MeshStandardMaterial({
+      const material = new (MOBILE_QUALITY ? THREE.MeshLambertMaterial : THREE.MeshStandardMaterial)({
         map: satTexture,
-        roughness: 0.85,
-        metalness: 0.02,
+        ...(MOBILE_QUALITY ? {} : { roughness: 0.85, metalness: 0.02 }),
         flatShading: false
       });
 
@@ -1350,28 +1373,10 @@
         shader.fragmentShader = shader.fragmentShader.replace(
           '#include <map_fragment>',
           `#include <map_fragment>
-           // Mountain relief slope: 0.0 on flat coastal plains, up to 1.0 on steep mountain cliffs
-           float slope = clamp(1.0 - abs(vWorldNormal.y), 0.0, 1.0);
-
-           // Detect sharp ridge lines and crest silhouettes using normal rate-of-change
-           float normalGrad = length(fwidth(vWorldNormal));
-           float ridgeOutline = smoothstep(0.03, 0.22, normalGrad);
-
-           // Dark crevice shading on steep volcanic slopes
-           float slopeShade = smoothstep(0.16, 0.72, slope);
-
-           // Combined dark mountain relief outline
-           float darkOutline = clamp(ridgeOutline * 0.55 + slopeShade * 0.42, 0.0, 0.75);
-
-           // Rich color saturation & S-curve contrast boost on satellite texture
-           vec3 col = diffuseColor.rgb;
-           col = (col - 0.5) * 1.22 + 0.5; // contrast punch
-           col = clamp(col, 0.0, 1.0);
-
-           // Apply dark outline to mountain reliefs
-           col *= (1.0 - darkOutline * uReliefContrast);
-
-           diffuseColor.rgb = col;
+           // Normalize interpolated normals; no screen-space derivatives or ridge outlines.
+           float slope = clamp(1.0 - abs(normalize(vWorldNormal).y), 0.0, 1.0);
+           float slopeShade = smoothstep(0.25, 0.85, slope);
+           diffuseColor.rgb *= (1.0 - 0.18 * slopeShade * uReliefContrast);
           `
         );
       };
@@ -1572,6 +1577,7 @@
           peakLabels.push({ obj: labelObj, index: i, div: div, wx: wx, wz: wz });
         }
       }
+      peakLabels.sort((a, b) => PEAKS[b.index].elev - PEAKS[a.index].elev);
       updatePeakDisplay();
     }
 
@@ -1632,7 +1638,7 @@
       const cy = camera.position.y;
       const cz = camera.position.z;
       const camDist = controls ? camera.position.distanceTo(controls.target) : 550;
-      const isMobile = window.innerWidth < 768;
+      const isMobile = MOBILE_QUALITY;
       const distThreshold = isMobile ? 620 : 540;
 
       camera.updateMatrixWorld();
@@ -1641,6 +1647,7 @@
       _projViewMatrix.multiplyMatrices(camera.projectionMatrix, _viewMatrix);
       const m = _projViewMatrix.elements;
 
+      let labelBudget = MOBILE_QUALITY ? 12 : Infinity;
       for (let j = 0; j < peakLabels.length; j++) {
         const item = peakLabels[j];
         const isSelected = (selectedPeakIndex === item.index);
@@ -1694,12 +1701,17 @@
           continue;
         }
 
+        if (!isSelected && labelBudget <= 0) {
+          item.obj.visible = false;
+          continue;
+        }
         // 3. Line-Of-Sight Terrain Occlusion Test:
         // Hide peak badges if obstructed by intermediate mountain ridges (selected peak stays visible)
         if (!isSelected && isPeakOccluded(cx, cy, cz, px, py, pz)) {
           item.obj.visible = false;
         } else {
           item.obj.visible = true;
+          labelBudget--;
         }
       }
     }
@@ -2161,7 +2173,7 @@ function flyToPeak(index) {
 
     function toggleSidebar() {
       const panel = document.getElementById('controls-panel');
-      const isMobile = window.innerWidth < 768;
+      const isMobile = MOBILE_QUALITY;
 
       if (isMobile) {
         panel.classList.toggle('open');
@@ -2222,9 +2234,9 @@ function flyToPeak(index) {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
 
-      const isMobile = window.innerWidth < 768;
-      const maxDPR = isMobile ? 1.5 : 2.0;
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDPR));
+      const isMobile = MOBILE_QUALITY;
+      const maxDPR = isMobile ? 1.0 : 2.0;
+      renderer.setPixelRatio(Math.min(renderer.getPixelRatio(), window.devicePixelRatio, maxDPR));
       renderer.setSize(window.innerWidth, window.innerHeight);
       labelRenderer.setSize(window.innerWidth, window.innerHeight);
 
@@ -2235,11 +2247,21 @@ function flyToPeak(index) {
     // =========================================================================
     // 11. High-Performance Render Loop (Render-on-Demand + Smooth Damping)
     // =========================================================================
+    let lastLabelUpdate = 0;
+    let slowQualityFrames = 0;
     function animate() {
       requestAnimationFrame(animate);
+      if (document.hidden) return;
       const now = performance.now();
       const dt = Math.min((now - lastFrameTime) / 1000, 0.05);
       lastFrameTime = now;
+      if (MOBILE_QUALITY && (isAnimatingCamera || renderRequested) && dt > 0.04) {
+        if (++slowQualityFrames >= 90 && renderer.getPixelRatio() > 0.75) {
+          renderer.setPixelRatio(0.75);
+          slowQualityFrames = 0;
+          requestRender();
+        }
+      } else slowQualityFrames = 0;
       updateKeyboardFlight(dt);
 
       updateCameraAnimation(now);
@@ -2253,8 +2275,10 @@ function flyToPeak(index) {
       updateUserMarkerScale();
 
       // Reactive Peak Labels Occlusion & Visibility Update
-      if (labelVisibilityDirty && peakLabels.length) {
+      if (labelVisibilityDirty && peakLabels.length &&
+          (!MOBILE_QUALITY || now - lastLabelUpdate > 100 || !controlsChanged)) {
         updatePeakLabelsVisibility();
+        lastLabelUpdate = now;
         labelVisibilityDirty = false;
       }
 

@@ -14,7 +14,6 @@ import json
 import os
 import sys
 
-import geopandas as gpd
 import numpy as np
 from PIL import Image
 import rasterio
@@ -23,9 +22,8 @@ from rasterio.warp import Resampling, calculate_default_transform, reproject
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BASE_DIR)
 
-DEM_PATH = os.path.join(PROJECT_DIR, "dem.tif")
-SATELLITE_PATH = os.path.join(PROJECT_DIR, "imagery.tif")
-PEAKS_PATH = os.path.join(PROJECT_DIR, "mauritius_public_peaks_named.geojson")
+DEM_PATH = sys.argv[1] if len(sys.argv) > 1 else os.path.join(PROJECT_DIR, "dem.tiff")
+SATELLITE_PATH = sys.argv[2] if len(sys.argv) > 2 else os.path.join(PROJECT_DIR, "imagery.tiff")
 TARGET_CRS = "EPSG:32740"
 
 
@@ -52,8 +50,11 @@ def main():
             resampling=Resampling.bilinear,
         )
 
-    # Sea level clamp
+    # Reprojection holes / undeclared non-finite data are ocean, not giant spikes.
+    elevation = np.nan_to_num(elevation, nan=0.0, posinf=0.0, neginf=0.0)
     elevation = np.where(elevation < 0, 0, elevation)
+    if np.max(elevation) * 10 > 32767:
+        raise ValueError("Elevation exceeds Int16 decimeter range")
     max_elev = float(np.max(elevation))
     min_elev = float(np.min(elevation))
 
@@ -117,42 +118,7 @@ def main():
         f.write(f'// Satellite texture as base64 data URI for file:// execution\nwindow.TEXTURE_DATA_URI = "data:image/jpeg;base64,{tex_b64}";\n')
     print(f"  Saved {tex_data_js_path} ({os.path.getsize(tex_data_js_path)/1024:.1f} KB)")
 
-    print("\n--- 3. Processing Peak Data ---")
-    peaks_gdf = gpd.read_file(PEAKS_PATH).to_crs(TARGET_CRS)
-    peaks_list = []
-
-    for idx, row in peaks_gdf.iterrows():
-        px = float(row.geometry.x)
-        py = float(row.geometry.y)
-        elev = float(row["dem_elevation"])
-        name = str(row["name"]).strip() if row["name"] is not None else ""
-        is_named = bool(name and name.lower() != "unnamed peak")
-
-        known_val = row.get("known_elev")
-        known_elev = float(known_val) if known_val is not None and not np.isnan(known_val) else None
-        url = str(row.get("url", "")).strip() if row.get("url") is not None else ""
-        fclass = str(row.get("fclass", "")).strip() if row.get("fclass") is not None else ""
-
-        # Coordinates relative to terrain center
-        rel_x = px - center_x
-        # In Three.js: +X is East, -Z is North
-        rel_z = -(py - center_y)
-
-        peaks_list.append({
-            "id": idx,
-            "name": name if name else "Unnamed Peak",
-            "isNamed": is_named,
-            "elev": round(elev, 1),
-            "known": round(known_elev, 1) if known_elev else None,
-            "url": url,
-            "fclass": fclass,
-            "x": round(rel_x, 1),
-            "z": round(rel_z, 1),
-        })
-
-    named_count = sum(1 for p in peaks_list if p["isNamed"])
-    print(f"  Total peaks: {len(peaks_list)} ({named_count} named)")
-
+    # peaks.js is the editable WGS84 source. Asset builds never overwrite it.
     print("\n--- 4. Writing data.js ---")
     data_js_path = os.path.join(BASE_DIR, "data.js")
     terrain_data = {
@@ -171,9 +137,6 @@ def main():
         f.write("// Mauritius 3D Peak Visualizer Data\n")
         f.write("const TERRAIN = ")
         json.dump(terrain_data, f, separators=(",", ":"))
-        f.write(";\n\n")
-        f.write("const PEAKS = ")
-        json.dump(peaks_list, f, separators=(",", ":"))
         f.write(";\n")
 
     print(f"  Saved {data_js_path} ({os.path.getsize(data_js_path)/1024:.1f} KB)")
@@ -182,3 +145,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    import runpy
+    runpy.run_path(os.path.join(BASE_DIR, "prepare-mobile.py"), run_name="__main__")
