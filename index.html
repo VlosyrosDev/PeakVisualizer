@@ -1932,7 +1932,7 @@ function copyPeakCoordinates(index) {
   const peak = PEAKS[index];
   const text = `${peak.lat}, ${peak.lon}`;
   const btn = document.getElementById('insp-copy-coords-btn');
-  const defaultLabel = '📋 Copy GPS Coordinates';
+  const defaultLabel = 'Copy Coordinates';
 
   navigator.clipboard.writeText(text).then(() => {
     btn.textContent = '✓ Copied';
