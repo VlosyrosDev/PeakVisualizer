@@ -1039,7 +1039,7 @@ const PEAKS = [
     "name": "Chapman Hill",
     "isNamed": true,
     "elev": 223.5,
-    "known": 230.0,
+    "known": 235.0,
     "url": "https://vlosyros.dev/PeakVisualizer/chapmanhill/",
     "fclass": "protected_peak",
     "lat": -20.2066667343,
@@ -1234,11 +1234,11 @@ const PEAKS = [
   },
   {
     "id": 112,
-    "name": "Unnamed Peak",
-    "isNamed": false,
+    "name": "Le Grand Malabar",
+    "isNamed": true,
     "elev": 271.2,
-    "known": null,
-    "url": "",
+    "known": 277.0,
+    "url": "https://www.google.com/maps/place/Le+Grand+Malabar/@-20.2277776,57.4477776,1023m/data=!3m1!1e3!4m12!1m5!3m4!2zMjDCsDEzJzQwLjAiUyA1N8KwMjYnNTIuMCJF!8m2!3d-20.2277776!4d57.4477776!3m5!1s0x217c45abd5d3222d:0x1a7baefbeb7185fe!8m2!3d-20.2279798!4d57.4483916!16s%2Fg%2F11rscjdsw8?entry=ttu&g_ep=EgoyMDI2MTAwNC4wIKXMDSoASAFQAw%3D%3D",
     "fclass": "forest",
     "lat": -20.2277776312,
     "lon": 57.4477776028
@@ -8502,5 +8502,16 @@ const PEAKS = [
     "fclass": "scrub",
     "lat": -20.4944446261,
     "lon": 57.5116662381
+  },
+  {
+    "id": 773,
+    "name": "The Head",
+    "isNamed": true,
+    "elev": 453.04,
+    "known": 460.0,
+    "url": "https://peakery.com/the-head-mauritius/",
+    "fclass": "scrub",
+    "lat": -20.253592849556505,
+    "lon":  57.45024687796005
   }
 ];

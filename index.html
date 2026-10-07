@@ -267,7 +267,7 @@
       font-feature-settings: "tnum";
     }
 
-    .counter-num span {
+    .counter-num #visible-count {
       color: var(--accent-green);
     }
 
@@ -528,7 +528,8 @@
       border-radius: 5px;
       background: rgba(52, 152, 219, 0.2);
       color: #70b7f5;
-      margin-bottom: 12px;
+      margin-bottom: 8px;
+      margin-top: 8px;
       text-transform: capitalize;
     }
 
@@ -553,12 +554,12 @@
       text-decoration: none;
     }
 
-    .btn-fly {
+    .btn-copy-coords {
       background: var(--accent-color);
       color: #fff;
     }
 
-    .btn-fly:hover {
+    .btn-copy-coords:hover {
       background: #ff476d;
     }
 
@@ -966,11 +967,11 @@
     <div class="counter-badge">
       <div>
         <div style="font-size: 10px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Visible Peaks</div>
-        <div class="counter-num"><span id="visible-count">773</span> / 773</div>
+        <div class="counter-num"><span id="visible-count">0</span> / <span id="total-peaks"></span></div>
       </div>
       <div style="text-align: right;">
         <div style="font-size: 10px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Elev Range</div>
-        <div style="font-size: 12px; font-weight: 700; color: #fff;">102m — 819m</div>
+        <div id="visible-elev-range" style="font-size: 12px; font-weight: 700; color: #fff;">—</div>
       </div>
     </div>
 
@@ -1105,8 +1106,8 @@
     </div>
 
     <div class="inspector-actions">
-      <button class="btn-action btn-fly" id="insp-fly-btn">🎯 Fly To Peak</button>
-      <a href="#" target="_blank" class="btn-action btn-link" id="insp-url-btn">🌐 More Info</a>
+      <button class="btn-action btn-copy-coords" id="insp-copy-coords-btn" type="button">Copy Coordinates</button>
+      <a href="#" target="_blank" class="btn-action btn-link" id="insp-url-btn">More Info</a>
     </div>
   </div>
 
@@ -1158,6 +1159,8 @@
     }
 
     function initScene() {
+      document.getElementById('total-peaks').textContent = PEAKS.length;
+
       // Only lat/lon are stored. Keep derived meters for all existing selection/filter code.
       for (const [index, peak] of PEAKS.entries()) {
         peak.id ??= index;
@@ -1463,7 +1466,7 @@
     }
 
     // =========================================================================
-    // 4. InstancedMesh for All 773 Peaks (1 Draw Call Optimization!)
+    // 4. InstancedMesh for All Peaks (1 Draw Call Optimization!)
     // =========================================================================
     // Reduced sphere radius from 1.6 to 0.85 for crisp pinpoint accuracy
     const PEAK_MARKER_RADIUS = 0.85;
@@ -1513,7 +1516,7 @@
     }
 
     function buildPeakInstancedMesh() {
-      // 1 single draw call for all 773 peaks!
+      // 1 single draw call for all peaks!
       peakInstancedMesh = new THREE.InstancedMesh(sphereGeometry, defaultPeakMaterial, PEAKS.length);
       peakInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
@@ -1596,6 +1599,8 @@
 
     function updatePeakDisplay() {
       let visibleCount = 0;
+      let minVisibleElev = Infinity;
+      let maxVisibleElev = -Infinity;
       if (selectedPeakIndex >= 0 && !peakMatchesFilters(PEAKS[selectedPeakIndex])) {
         selectedPeakIndex = -1;
         selectedMarkerMesh.visible = false;
@@ -1607,7 +1612,11 @@
         const isVisible = peakMatchesFilters(peak);
 
         dummy.position.set(peak.x * SCALE, peak.elev * SCALE * zExaggeration, peak.z * SCALE);
-        if (isVisible) visibleCount++;
+        if (isVisible) {
+          visibleCount++;
+          if (peak.elev < minVisibleElev) minVisibleElev = peak.elev;
+          if (peak.elev > maxVisibleElev) maxVisibleElev = peak.elev;
+        }
         const showMarker = isVisible && i !== selectedPeakIndex;
         if (showMarker) {
           dummy.scale.set(markerScale, markerScale, markerScale);
@@ -1621,6 +1630,13 @@
 
       labelVisibilityDirty = true;
       document.getElementById('visible-count').textContent = visibleCount;
+      const elevRangeEl = document.getElementById('visible-elev-range');
+      if (visibleCount > 0) {
+        elevRangeEl.textContent =
+          `${Math.round(minVisibleElev)}m — ${Math.round(maxVisibleElev)}m`;
+      } else {
+        elevRangeEl.textContent = '—';
+      }
       updatePeakLabelsVisibility();
       requestRender();
     }
@@ -1912,6 +1928,20 @@ function flyToPeak(index) {
   requestRender();
 }
 
+function copyPeakCoordinates(index) {
+  const peak = PEAKS[index];
+  const text = `${peak.lat}, ${peak.lon}`;
+  const btn = document.getElementById('insp-copy-coords-btn');
+  const defaultLabel = '📋 Copy GPS Coordinates';
+
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = '✓ Copied';
+    setTimeout(() => {
+      btn.textContent = defaultLabel;
+    }, 1500);
+  });
+}
+
     // =========================================================================
     // 7. Raycasting & Peak Selection
     // =========================================================================
@@ -1967,6 +1997,7 @@ function flyToPeak(index) {
     function selectPeak(index) {
       selectedPeakIndex = index;
       const peak = PEAKS[index];
+      console.log('Selected peak id:', peak.id);
 
       // Move highlight sphere over summit
       selectedMarkerMesh.position.set(
@@ -2002,7 +2033,7 @@ function flyToPeak(index) {
         urlBtn.style.display = 'none';
       }
 
-      document.getElementById('insp-fly-btn').onclick = () => flyToPeak(index);
+      document.getElementById('insp-copy-coords-btn').onclick = () => copyPeakCoordinates(index);
       document.getElementById('inspector-card').style.display = 'block';
 
       recordPeakInspection();
