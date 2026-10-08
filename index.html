@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -955,7 +955,7 @@
 
     <div class="search-container">
       <span class="search-icon">🔍</span>
-      <input type="text" id="peak-search" class="search-input" placeholder="Search named peaks (e.g. Pieter Both)..." />
+      <input type="text" id="peak-search" class="search-input" placeholder="Search peaks or coordinates (e.g. -20.16, 57.56)..." />
       <div id="search-results" class="search-results"></div>
     </div>
   </div>
@@ -1928,10 +1928,153 @@ function flyToPeak(index) {
   requestRender();
 }
 
+function validateLatLon(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return { lat, lon };
+}
+
+function assignLatLon(a, b) {
+  const isIslandLat = (v) => v >= -21.5 && v <= -19.5;
+  const isIslandLon = (v) => v >= 57 && v <= 58.5;
+  if (isIslandLat(a) && isIslandLon(b)) return validateLatLon(a, b);
+  if (isIslandLat(b) && isIslandLon(a)) return validateLatLon(b, a);
+
+  let lat;
+  let lon;
+  if (Math.abs(a) > 90 && Math.abs(b) <= 90) {
+    lon = a;
+    lat = b;
+  } else if (Math.abs(b) > 90 && Math.abs(a) <= 90) {
+    lat = a;
+    lon = b;
+  } else if (Math.abs(a) <= 90 && Math.abs(b) <= 180) {
+    lat = a;
+    lon = b;
+  } else {
+    return null;
+  }
+  return validateLatLon(lat, lon);
+}
+
+function parseCoordinates(input) {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  let s = trimmed.replace(/[°º′'″"]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const directed = s.match(/(-?\d+(?:\.\d+)?)\s*([NnSs])\W*(-?\d+(?:\.\d+)?)\s*([EeWw])/);
+  if (directed) {
+    const lat = parseFloat(directed[1]) * (directed[2].toUpperCase() === 'S' ? -1 : 1);
+    const lon = parseFloat(directed[3]) * (directed[4].toUpperCase() === 'W' ? -1 : 1);
+    return validateLatLon(lat, lon);
+  }
+
+  const numbers = s.match(/-?\d+(?:\.\d+)?/g);
+  if (!numbers || numbers.length < 2) return null;
+  if (numbers.length > 2) return null;
+
+  return assignLatLon(parseFloat(numbers[0]), parseFloat(numbers[1]));
+}
+
+function coordinatesOnTerrain(lat, lon) {
+  const { x, z } = gpsToScene(lat, lon);
+  return x >= -halfW && x <= halfW && z >= -halfH && z <= halfH;
+}
+
+function flyToCoordinates(latDeg, lonDeg) {
+  cancelPresetFlight();
+  const coords = validateLatLon(latDeg, lonDeg);
+  if (!coords) return false;
+
+  const { x, z } = gpsToScene(coords.lat, coords.lon);
+  if (!coordinatesOnTerrain(coords.lat, coords.lon)) return false;
+
+  const py = getTerrainHeight(x, z);
+
+  animStartCameraPos.copy(camera.position);
+  animStartLookAt.copy(controls.target);
+
+  targetCameraPos = new THREE.Vector3(x - 32, py + 26, z + 42);
+  targetLookAt = new THREE.Vector3(x, py, z);
+
+  animStartTime = performance.now();
+  animDuration = 1200;
+  isAnimatingCamera = true;
+
+  closeInspector();
+  labelVisibilityDirty = true;
+  requestRender();
+  return true;
+}
+
+function placeCoordMarker(lat, lon) {
+  const { x, z } = gpsToScene(lat, lon);
+  const y = getTerrainHeight(x, z);
+
+  // Build the marker lazily on first use
+  if (!coordMarkerGroup) {
+    coordMarkerGroup = new THREE.Group();
+    coordMarkerGroup.renderOrder = 6;
+    scene.add(coordMarkerGroup);
+
+    // Vertical pin stem
+    const stemGeom = new THREE.CylinderGeometry(0.12, 0.12, 6, 8);
+    const stemMat = new THREE.MeshBasicMaterial({ color: 0xf39c12 });
+    const stem = new THREE.Mesh(stemGeom, stemMat);
+    stem.position.y = 3;
+    stem.renderOrder = 6;
+    coordMarkerGroup.add(stem);
+
+    // Sphere head at top of pin
+    const headGeom = new THREE.SphereGeometry(0.55, 12, 8);
+    const headMat = new THREE.MeshBasicMaterial({ color: 0xf39c12 });
+    const head = new THREE.Mesh(headGeom, headMat);
+    head.position.y = 6.4;
+    head.renderOrder = 7;
+    coordMarkerGroup.add(head);
+
+    // White border ring at base
+    const ringGeom = new THREE.RingGeometry(0.55, 0.85, 24);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      depthTest: false
+    });
+    const ring = new THREE.Mesh(ringGeom, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.05;
+    ring.renderOrder = 6;
+    coordMarkerGroup.add(ring);
+  }
+
+  coordMarkerGroup.position.set(x, y, z);
+  coordMarkerGroup.visible = true;
+
+  // Scale the marker with camera distance so it stays readable at any zoom
+  const dist = camera.position.distanceTo(coordMarkerGroup.position);
+  const s = Math.max(1.5, Math.min(7.0, dist / 90));
+  coordMarkerGroup.scale.setScalar(s);
+
+  requestRender();
+}
+
+function clearCoordMarker() {
+  if (coordMarkerGroup) {
+    coordMarkerGroup.visible = false;
+    requestRender();
+  }
+}
+
+
 function copyPeakCoordinates(index) {
   const peak = PEAKS[index];
   const text = `${peak.lat}, ${peak.lon}`;
   const btn = document.getElementById('insp-copy-coords-btn');
+
   const defaultLabel = 'Copy Coordinates';
 
   navigator.clipboard.writeText(text).then(() => {
@@ -2058,25 +2201,68 @@ function copyPeakCoordinates(index) {
     const searchInput = document.getElementById('peak-search');
     const searchResults = document.getElementById('search-results');
 
-    searchInput.addEventListener('input', (e) => {
-      const q = e.target.value.toLowerCase().trim();
+    function formatCoordLabel(lat, lon) {
+      return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    }
+
+    function renderSearchResults(rawQuery) {
+      const q = rawQuery.toLowerCase().trim();
       if (!q) {
         searchResults.style.display = 'none';
         return;
       }
 
+      const coordMatch = parseCoordinates(rawQuery);
+      const items = [];
+
+      if (coordMatch) {
+        const onMap = coordinatesOnTerrain(coordMatch.lat, coordMatch.lon);
+        const label = formatCoordLabel(coordMatch.lat, coordMatch.lon);
+        if (onMap) {
+          items.push(`
+            <div class="search-item" onclick="onSearchSelectCoords(${coordMatch.lat}, ${coordMatch.lon})">
+              <span>Go to ${label}</span>
+              <span class="item-elev">coords</span>
+            </div>
+          `);
+        } else {
+          items.push(
+            `<div class="search-item" style="color:var(--text-muted);cursor:default;">${label} is outside this map</div>`
+          );
+        }
+      }
+
       const matches = PEAKS.filter(p => p.isNamed && p.lowerName.includes(q)).slice(0, 8);
-      if (matches.length === 0) {
-        searchResults.innerHTML = '<div class="search-item" style="color:var(--text-muted);">No matching peaks</div>';
-      } else {
-        searchResults.innerHTML = matches.map(p => `
+      for (const p of matches) {
+        items.push(`
           <div class="search-item" onclick="onSearchSelect(${p.id})">
             <span>${p.name}</span>
             <span class="item-elev">${Math.round(p.elev)}m</span>
           </div>
-        `).join('');
+        `);
+      }
+
+      if (items.length === 0) {
+        searchResults.innerHTML = '<div class="search-item" style="color:var(--text-muted);">No matching peaks or coordinates</div>';
+      } else {
+        searchResults.innerHTML = items.join('');
       }
       searchResults.style.display = 'block';
+    }
+
+    searchInput.addEventListener('input', (e) => {
+      renderSearchResults(e.target.value);
+    });
+
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const coordMatch = parseCoordinates(searchInput.value);
+      if (!coordMatch || !flyToCoordinates(coordMatch.lat, coordMatch.lon)) return;
+      e.preventDefault();
+      searchResults.style.display = 'none';
+      searchInput.value = formatCoordLabel(coordMatch.lat, coordMatch.lon);
+      placeCoordMarker(coordMatch.lat, coordMatch.lon);
+      trackAnalyticsEvent('search_coords', { query: searchInput.value });
     });
 
     document.addEventListener('click', (e) => {
@@ -2090,6 +2276,14 @@ function copyPeakCoordinates(index) {
       searchInput.value = PEAKS[id].name;
       trackAnalyticsEvent('search_peak', { query: PEAKS[id].name });
       flyToPeak(id);
+    }
+
+    function onSearchSelectCoords(lat, lon) {
+      searchResults.style.display = 'none';
+      searchInput.value = formatCoordLabel(lat, lon);
+      trackAnalyticsEvent('search_coords', { query: searchInput.value });
+      flyToCoordinates(lat, lon);
+      placeCoordMarker(lat, lon);
     }
 
     // =========================================================================
@@ -2304,6 +2498,11 @@ function copyPeakCoordinates(index) {
         labelVisibilityDirty = true;
       }
       updateUserMarkerScale();
+      // Keep the coord-search pin at a readable size across all zoom levels
+      if (coordMarkerGroup && coordMarkerGroup.visible) {
+        const dist = camera.position.distanceTo(coordMarkerGroup.position);
+        coordMarkerGroup.scale.setScalar(Math.max(1.5, Math.min(7.0, dist / 90)));
+      }
 
       // Reactive Peak Labels Occlusion & Visibility Update
       if (labelVisibilityDirty && peakLabels.length &&
@@ -2486,6 +2685,7 @@ function copyPeakCoordinates(index) {
     }
 
     // --- 3D location marker objects ---
+    let coordMarkerGroup = null;       // Pin marker placed at a searched coordinate
     let userLocationGroup = null;      // Group holding all user-marker parts
     let userLocationActive = false;
     let geoWatchId = null;
