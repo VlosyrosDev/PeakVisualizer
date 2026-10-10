@@ -624,6 +624,14 @@
       color: #ffea00;
     }
 
+    .camera-mode-buttons { display: flex; gap: 8px; margin-bottom: 10px; }
+    .camera-mode-buttons button { flex: 1; }
+    .camera-mode-buttons button[aria-pressed="true"] { border-color: var(--accent-blue); color: #fff; }
+    .fly-help { font-size: 11px; color: var(--text-muted); line-height: 1.6; }
+    #fly-overlay { display: none; position: fixed; inset: 0; pointer-events: none; z-index: 15; }
+    #fly-overlay::before { content: '+'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: white; font-size: 22px; text-shadow: 0 1px 3px #000; }
+    #fly-overlay span { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); padding: 6px 12px; border-radius: 6px; background: rgba(5,10,20,.85); color: #fff; font-size: 12px; white-space: nowrap; }
+
     /* Loading Overlay */
     #loading-overlay {
       position: absolute;
@@ -1003,6 +1011,19 @@
 
     <button class="preset-btn" id="reset-settings-btn" onclick="resetMapSettings()" style="width:100%; margin-top:12px;">↺ Reset map & settings</button>
 
+    <div id="fly-controls" hidden>
+      <div class="section-title">Navigation Mode</div>
+      <div class="camera-mode-buttons">
+        <button class="preset-btn" id="orbit-mode-btn" aria-pressed="true">Orbit / Map</button>
+        <button class="preset-btn" id="fps-mode-btn" aria-pressed="false">FPS Fly</button>
+      </div>
+      <div class="slider-group">
+        <label class="slider-label" for="fly-speed-slider"><span>Fly Speed</span><span class="slider-value" id="fly-speed-val">200 m/s</span></label>
+        <input type="range" id="fly-speed-slider" min="0" max="100" value="50" step="1" />
+      </div>
+      <div class="fly-help" id="fly-status" role="status">WASD to fly · Mouse to look · Space / Ctrl up / down · Shift faster · Esc to return</div>
+    </div>
+
     <!-- Sliders -->
     <div class="section-title">Elevation & Relief Controls</div>
     <div class="slider-group">
@@ -1061,12 +1082,14 @@
       • Left Click / 1 Finger: Rotate<br/>
       • Right Click / 2 Fingers: Pan<br/>
       • Scroll / Pinch: Zoom<br/>
-      • <kbd>W</kbd><kbd>S</kbd><kbd>A</kbd><kbd>D</kbd> or Arrows: Fly<br/>
+      • <kbd>W</kbd><kbd>S</kbd><kbd>A</kbd><kbd>D</kbd>: Fly; drag to look while held<br/>
+      • Arrows: Map flight<br/>
       • <kbd>Q</kbd> / <kbd>E</kbd>: Altitude
     </div>
   </div>
 
   <!-- Toggle Sidebar Button -->
+  <div id="fly-overlay"><span>FPS Fly · WASD · Space / Ctrl · Shift faster · Esc to return</span></div>
   <button class="toggle-panel-btn" onclick="toggleSidebar()">
     <span id="panel-btn-icon">⚙️</span> <span id="panel-btn-text">Filters & Settings</span>
   </button>
@@ -1145,7 +1168,6 @@
     let labelVisibilityDirty = true;
 
     // Preallocated math objects (zero GC in render loop)
-    const _viewMatrix = new THREE.Matrix4();
     const _projViewMatrix = new THREE.Matrix4();
     const _forwardVec = new THREE.Vector3();
     const _rightVec = new THREE.Vector3();
@@ -1215,12 +1237,13 @@
       controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
       controls.dampingFactor = 0.09;
-      controls.maxPolarAngle = Math.PI / 2 - 0.04;
+      controls.maxPolarAngle = ORBIT_MAX_POLAR;
       controls.minDistance = 15.0;
       controls.maxDistance = 2200.0;
       controls.addEventListener('change', () => {
         requestRender();
         labelVisibilityDirty = true;
+        if (mapFlightActive) mapFlightOrbitDistance = camera.position.distanceTo(controls.target);
       });
 
       // Index peak names for instant search
@@ -1270,12 +1293,14 @@
 
       // Keyboard navigation
       window.addEventListener('keydown', onKeyDown, false);
-      window.addEventListener('keyup', e => pressedKeys.delete(e.key.toLowerCase()));
-      window.addEventListener('blur', () => pressedKeys.clear());
-      document.addEventListener('visibilitychange', () => { pressedKeys.clear(); lastFrameTime = performance.now(); requestRender(); });
+      window.addEventListener('keyup', onKeyUp);
+      window.addEventListener('blur', () => { pressedKeys.clear(); stopMapFlight(); stopFPSFly(); });
+      document.addEventListener('visibilitychange', () => { pressedKeys.clear(); if (document.hidden) { stopMapFlight(); stopFPSFly(); } lastFrameTime = performance.now(); requestRender(); });
       document.addEventListener('focusin', e => {
-        if (e.target.closest('input, textarea, select, [contenteditable]')) pressedKeys.clear();
+        if (isTypingTarget(e.target)) { pressedKeys.clear(); stopMapFlight(); stopFPSFly(); }
       });
+
+      initFPSControls();
 
       // Desktop starts open, Mobile starts collapsed
       if (!isMobile) {
@@ -1641,94 +1666,59 @@
       requestRender();
     }
 
+    // Reuse candidate/rectangle storage. No DOM measurements or terrain-mesh raycasts.
+    const labelCandidates = [];
+    const acceptedLabels = [];
+
     function updatePeakLabelsVisibility() {
       if (!camera || !peakLabels.length) return;
-      if (!showLabels) {
-        for (let j = 0; j < peakLabels.length; j++) {
-          peakLabels[j].obj.visible = false;
-        }
-        return;
-      }
-
-      const cx = camera.position.x;
-      const cy = camera.position.y;
-      const cz = camera.position.z;
-      const camDist = controls ? camera.position.distanceTo(controls.target) : 550;
-      const isMobile = MOBILE_QUALITY;
-      const distThreshold = isMobile ? 620 : 540;
-
-      camera.updateMatrixWorld();
-      // Projective view matrix for frustum culling
-      _viewMatrix.copy(camera.matrixWorldInverse);
-      _projViewMatrix.multiplyMatrices(camera.projectionMatrix, _viewMatrix);
+      camera.updateMatrixWorld(); // Culling must use this frame's pose, before either renderer.
+      _projViewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
       const m = _projViewMatrix.elements;
-
-      let labelBudget = MOBILE_QUALITY ? 12 : Infinity;
-      for (let j = 0; j < peakLabels.length; j++) {
-        const item = peakLabels[j];
-        const isSelected = (selectedPeakIndex === item.index);
-
-        // When a peak is selected, hide all other peak name badges
-        if (selectedPeakIndex >= 0 && !isSelected) {
-          item.obj.visible = false;
-          item.div.classList.remove('selected');
-          continue;
-        }
-
-        item.div.classList.toggle('selected', isSelected);
-
+      const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
+      labelCandidates.length = 0;
+      acceptedLabels.length = 0;
+      for (const item of peakLabels) {
         const peak = PEAKS[item.index];
-        if (!peakMatchesFilters(peak)) {
-          item.obj.visible = false;
-          continue;
-        }
-        const px = item.wx;
-        const pz = item.wz;
-        const py = peak.elev * SCALE * zExaggeration;
-
-        // 1. Elevation and prominence check (selected peak bypasses this check)
-        // Only completed-only browsing uses camera-to-summit distance.
-        // Show these two badges in the opening/island view, but hide them
-        // beyond 1800 scene units. Normal peak LOD stays unchanged.
-        const completedLabel = showCompletedOnly && isVlosyrosPeak(peak);
-        const completedDistance = completedLabel
-          ? Math.hypot(cx - px, cy - py, cz - pz) : 0;
-        const isProminent = completedLabel
-          ? (isSelected || completedDistance < 1800)
-          : ((peak.elev >= distThreshold) || (currentMinElev > 0) || isSelected || camDist < 340);
-        if (!isSelected && (peak.elev < currentMinElev || !isProminent)) {
-          item.obj.visible = false;
-          continue;
-        }
-
-        // 2. Frustum culling: Check if peak is behind camera or beyond viewport boundaries
-        const clipW = m[3] * px + m[7] * py + m[11] * pz + m[15];
-        if (clipW <= 0.1) {
-          // Behind camera
-          item.obj.visible = false;
-          continue;
-        }
-        const invW = 1.0 / clipW;
-        const clipX = (m[0] * px + m[4] * py + m[8] * pz + m[12]) * invW;
-        const clipY = (m[1] * px + m[5] * py + m[9] * pz + m[13]) * invW;
-        if (clipX < -1.15 || clipX > 1.15 || clipY < -1.15 || clipY > 1.15) {
-          // Outside visible screen margins
-          item.obj.visible = false;
-          continue;
-        }
-
-        if (!isSelected && labelBudget <= 0) {
-          item.obj.visible = false;
-          continue;
-        }
-        // 3. Line-Of-Sight Terrain Occlusion Test:
-        // Hide peak badges if obstructed by intermediate mountain ridges (selected peak stays visible)
-        if (!isSelected && isPeakOccluded(cx, cy, cz, px, py, pz)) {
-          item.obj.visible = false;
-        } else {
-          item.obj.visible = true;
-          labelBudget--;
-        }
+        const selected = selectedPeakIndex === item.index;
+        item.obj.visible = false;
+        item.div.classList.toggle('selected', selected);
+        if (!showLabels || !peakMatchesFilters(peak)) continue;
+        const px = item.wx, py = item.obj.position.y, pz = item.wz;
+        const distanceSq = (cx-px)**2 + (cy-py)**2 + (cz-pz)**2;
+        const charted = showCompletedOnly && isVlosyrosPeak(peak);
+        // Per-summit LOD works for translation as well as orbit zoom. Smaller
+        // summits progressively join prominent peaks as the camera approaches.
+        const maxDistance = charted ? 1800 : 420 + 380 * (Math.min(peak.elev, 820) / 820)**2;
+        if (!selected && distanceSq > maxDistance * maxDistance) continue;
+        const w = m[3]*px + m[7]*py + m[11]*pz + m[15];
+        if (w <= 0.1) continue;
+        const x = (m[0]*px + m[4]*py + m[8]*pz + m[12]) / w;
+        const y = (m[1]*px + m[5]*py + m[9]*pz + m[13]) / w;
+        const z = (m[2]*px + m[6]*py + m[10]*pz + m[14]) / w;
+        if (x < -1.05 || x > 1.05 || y < -1.05 || y > 1.05 || z < -1 || z > 1) continue;
+        item.distanceSq = distanceSq;
+        item.close = distanceSq < 150 * 150;
+        item.priority = selected ? -2 : charted ? -1 : distanceSq / (1 + peak.elev / 820);
+        item.screenX = (x + 1) * innerWidth / 2;
+        item.screenY = (1 - y) * innerHeight / 2;
+        // Conservative badge bounds; estimating avoids layout reads during flight.
+        item.halfWidth = (peak.name.length * 6.5 + 60) / 2;
+        item.alwaysShow = selected || charted || (!MOBILE_QUALITY && item.close);
+        labelCandidates.push(item);
+      }
+      labelCandidates.sort((a, b) => a.priority - b.priority);
+      const budget = MOBILE_QUALITY ? 12 : 36;
+      for (const item of labelCandidates) {
+        const selected = selectedPeakIndex === item.index;
+        if (!selected && (MOBILE_QUALITY || !item.alwaysShow) && acceptedLabels.length >= budget) continue;
+        if (!item.alwaysShow && acceptedLabels.some(other =>
+            Math.abs(item.screenY - other.screenY) < (MOBILE_QUALITY ? 30 : 24) &&
+            Math.abs(item.screenX - other.screenX) < item.halfWidth + other.halfWidth + 8)) continue;
+        const peak = PEAKS[item.index];
+        if (!selected && isPeakOccluded(cx, cy, cz, item.wx, peak.elev * SCALE * zExaggeration, item.wz)) continue;
+        item.obj.visible = true;
+        acceptedLabels.push(item);
       }
     }
 
@@ -1828,7 +1818,7 @@ function startPresetFlight(camPos, targetLook) {
   presetEndOrbit.radius = THREE.MathUtils.clamp(presetEndOrbit.radius,
     controls.minDistance, controls.maxDistance);
   presetEndOrbit.phi = THREE.MathUtils.clamp(presetEndOrbit.phi,
-    controls.minPolarAngle, controls.maxPolarAngle);
+    controls.minPolarAngle, ORBIT_MAX_POLAR);
   presetEndOrbit.makeSafe();
   const thetaDelta = presetEndOrbit.theta - presetStartOrbit.theta;
   presetAzimuthDelta = Math.atan2(Math.sin(thetaDelta), Math.cos(thetaDelta));
@@ -1872,6 +1862,8 @@ function updateCameraAnimation(now) {
 
 
 function setCameraView(preset, animateCam = true) {
+  stopMapFlight();
+  stopFPSFly();
   let camPos, targetLook;
 
   if (preset === 'overview') {
@@ -1896,6 +1888,7 @@ function setCameraView(preset, animateCam = true) {
     cancelPresetFlight();
     isAnimatingCamera = false;
     targetCameraPos = targetLookAt = null;
+    controls.maxPolarAngle = ORBIT_MAX_POLAR;
     camera.position.copy(camPos);
     controls.target.copy(targetLook);
     controls.update();
@@ -1906,6 +1899,8 @@ function setCameraView(preset, animateCam = true) {
 }
 
 function flyToPeak(index) {
+  stopMapFlight();
+  stopFPSFly();
   cancelPresetFlight();
   const peak = PEAKS[index];
   const px = peak.x * SCALE;
@@ -1983,6 +1978,8 @@ function coordinatesOnTerrain(lat, lon) {
 }
 
 function flyToCoordinates(latDeg, lonDeg) {
+  stopMapFlight();
+  stopFPSFly();
   cancelPresetFlight();
   const coords = validateLatLon(latDeg, lonDeg);
   if (!coords) return false;
@@ -2114,8 +2111,8 @@ function copyPeakCoordinates(index) {
       if (Math.hypot(dx, dy) > 8) return; // ignore drags
 
       // Compute NDC mouse coords for raycasting
-      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      mouse.x = fpsActive ? 0 : (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = fpsActive ? 0 : -(e.clientY / window.innerHeight) * 2 + 1;
 
       raycaster.setFromCamera(mouse, camera);
       const intersects = raycaster.intersectObject(peakInstancedMesh);
@@ -2332,6 +2329,11 @@ function copyPeakCoordinates(index) {
     });
 
     function resetMapSettings() {
+      stopMapFlight();
+      stopFPSFly();
+      document.getElementById('fly-speed-slider').value = 50;
+      updateFlySpeed();
+      controls.maxPolarAngle = ORBIT_MAX_POLAR;
       pressedKeys.clear();
       userLocationActive = false;
       stopUserLocation();
@@ -2413,44 +2415,339 @@ function copyPeakCoordinates(index) {
     }
 
     // =========================================================================
-    // 10. Keyboard Flight Navigation (matching 3d.py)
+    // 10. Orbit Keyboard Navigation and Optional Desktop FPS Flight
     // =========================================================================
     const pressedKeys = new Set();
     const flightKeys = new Set(['w', 'a', 's', 'd', 'q', 'e',
       'arrowup', 'arrowdown', 'arrowleft', 'arrowright']);
+    const fpsKeys = new Set(['w', 'a', 's', 'd', ' ', 'control', 'shift']);
     const flightDirection = new THREE.Vector3();
+    const ORBIT_MAX_POLAR = Math.PI / 2 - 0.04;
+    const fpsEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+    const fpsSavedPosition = new THREE.Vector3();
+    const fpsSavedTarget = new THREE.Vector3();
+    const fpsSavedQuaternion = new THREE.Quaternion();
+    let fpsActive = false;
+    let fpsLockPending = false;
+    let fpsYaw = 0, fpsPitch = 0, fpsTargetYaw = 0, fpsTargetPitch = 0;
+    let fpsOrbitDistance = 100;
+    let flySpeed = 200;
     let lastFrameTime = performance.now();
+    let mapFlightActive = false;
+    let mapFlightOrbitDistance = 100;
+    let mapSavedRotate = true, mapSavedPan = true;
+    let mapYaw = 0, mapPitch = 0, mapTargetYaw = 0, mapTargetPitch = 0;
+    const mapLookEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+    let mapDragPointerId = null, mapDragButton = -1, mapDragPointerType = 'mouse';
+    let mapDragX = 0, mapDragY = 0;
+    let mapDragCtrl = false, mapDragMeta = false, mapDragShift = false;
+
+    function isMapFlightHeld() {
+      return pressedKeys.has('w') || pressedKeys.has('a') || pressedKeys.has('s') || pressedKeys.has('d');
+    }
+
+    function resumeMapGesture() {
+      if (mapDragPointerId === null) return;
+      controls.beginPointerInteraction({ pointerType: mapDragPointerType,
+        button: mapDragButton, clientX: mapDragX, clientY: mapDragY,
+        ctrlKey: mapDragCtrl, metaKey: mapDragMeta, shiftKey: mapDragShift,
+        preventDefault() {} });
+    }
+
+    function startMapFlight() {
+      if (mapFlightActive || fpsActive || MOBILE_QUALITY) return;
+      controls.cancelInteraction(); // Clear damping/anchors without moving the camera.
+      mapSavedRotate = controls.enableRotate;
+      mapSavedPan = controls.enablePan;
+      mapFlightOrbitDistance = THREE.MathUtils.clamp(camera.position.distanceTo(controls.target),
+        controls.minDistance, controls.maxDistance);
+      mapLookEuler.setFromQuaternion(camera.quaternion, 'YXZ');
+      mapYaw = mapTargetYaw = mapLookEuler.y;
+      mapPitch = mapTargetPitch = mapLookEuler.x;
+      mapFlightActive = true;
+      // Leave zoom enabled on the original controls. Only desktop rotation and
+      // pan belong to drag-to-look while WASD is held.
+      controls.enableRotate = controls.enablePan = false;
+      if (mapDragPointerId !== null) {
+        if (mapDragButton === 1) resumeMapGesture();
+        else renderer.domElement.setPointerCapture(mapDragPointerId);
+      }
+    }
+
+    function stopMapFlight(resumeDrag = false) {
+      if (!resumeDrag) mapDragPointerId = null;
+      if (!mapFlightActive) return;
+      mapFlightActive = false;
+      if (!resumeDrag) pressedKeys.clear();
+      controls.cancelInteraction();
+      controls.enableRotate = mapSavedRotate;
+      controls.enablePan = mapSavedPan;
+      camera.getWorldDirection(_forwardVec);
+      controls.target.copy(camera.position).addScaledVector(_forwardVec, mapFlightOrbitDistance);
+      // Keep an upward view intact instead of clamping it on the handoff frame.
+      controls.maxPolarAngle = Math.max(ORBIT_MAX_POLAR,
+        Math.acos(THREE.MathUtils.clamp(-_forwardVec.y, -1, 1)) + 0.000001);
+      controls.update();
+      if (resumeDrag) resumeMapGesture();
+      labelVisibilityDirty = true;
+      requestRender();
+    }
+
+    function onMapPointerDown(e) {
+      if (fpsActive || e.target !== renderer.domElement ||
+          (e.pointerType !== 'mouse' && e.pointerType !== 'pen') || mapDragPointerId !== null) return;
+      mapDragPointerId = e.pointerId;
+      mapDragPointerType = e.pointerType;
+      mapDragButton = e.button;
+      mapDragX = e.clientX;
+      mapDragY = e.clientY;
+      mapDragCtrl = e.ctrlKey; mapDragMeta = e.metaKey; mapDragShift = e.shiftKey;
+      if (mapFlightActive && (e.button === 0 || e.button === 2)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        // Retain the marker handler's drag origin so a look gesture cannot
+        // become an accidental peak click on pointerup.
+        onPointerDown(e);
+        renderer.domElement.setPointerCapture(e.pointerId);
+      }
+    }
+
+    function onMapPointerMove(e) {
+      if (e.pointerId !== mapDragPointerId) return;
+      const dx = e.clientX - mapDragX, dy = e.clientY - mapDragY;
+      mapDragX = e.clientX; mapDragY = e.clientY;
+      mapDragCtrl = e.ctrlKey; mapDragMeta = e.metaKey; mapDragShift = e.shiftKey;
+      if (!mapFlightActive || (mapDragButton !== 0 && mapDragButton !== 2)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      mapTargetYaw -= dx * 0.002;
+      mapTargetPitch = THREE.MathUtils.clamp(mapTargetPitch - dy * 0.002,
+        -Math.PI / 2 + 0.001, Math.PI / 2 - 0.001);
+      requestRender();
+    }
+
+    function onMapPointerEnd(e) {
+      if (e.pointerId !== mapDragPointerId) return;
+      mapDragPointerId = null;
+      if (e.type === 'pointercancel' && mapFlightActive) controls.cancelInteraction();
+    }
+
+    function onKeyUp(e) {
+      pressedKeys.delete(e.key.toLowerCase());
+      mapDragCtrl = e.ctrlKey; mapDragMeta = e.metaKey; mapDragShift = e.shiftKey;
+      if (mapFlightActive && !isMapFlightHeld()) stopMapFlight(true);
+    }
+
+    function isTypingTarget(target) {
+      return target instanceof Element && !!target.closest('input, textarea, select, [contenteditable], [role="textbox"]');
+    }
+
+    function updateFlySpeed() {
+      // Logarithmic: 20–2000 m/s, with useful precision for close exploration.
+      flySpeed = Math.round(20 * Math.pow(100, Number(document.getElementById('fly-speed-slider').value) / 100));
+      document.getElementById('fly-speed-val').textContent = flySpeed + ' m/s';
+    }
+
+    function initFPSControls() {
+      const section = document.getElementById('fly-controls');
+      section.hidden = MOBILE_QUALITY;
+      if (MOBILE_QUALITY) return;
+      // Capture desktop gestures before OrbitControls, while retaining its
+      // untouched touch, wheel and middle-button zoom handlers.
+      document.addEventListener('pointerdown', onMapPointerDown, true);
+      document.addEventListener('pointermove', onMapPointerMove, true);
+      document.addEventListener('pointerup', onMapPointerEnd, true);
+      document.addEventListener('pointercancel', onMapPointerEnd, true);
+      const button = document.getElementById('fps-mode-btn');
+      button.disabled = !renderer.domElement.requestPointerLock;
+      if (button.disabled) document.getElementById('fly-status').textContent = 'FPS mouse-look is unavailable in this browser. Orbit / Map still works.';
+      button.addEventListener('click', requestFPSFly);
+      document.getElementById('orbit-mode-btn').addEventListener('click', () => stopFPSFly());
+      document.getElementById('fly-speed-slider').addEventListener('input', updateFlySpeed);
+      document.addEventListener('mousemove', onFPSMouseMove);
+      document.addEventListener('pointerlockerror', () => {
+        fpsLockPending = false;
+        if (!fpsActive) document.getElementById('fly-status').textContent = 'Mouse lock was blocked. Click FPS Fly to try again.';
+      });
+      document.addEventListener('pointerlockchange', () => {
+        if (document.pointerLockElement === renderer.domElement) {
+          if (!fpsLockPending || document.hidden) { document.exitPointerLock(); return; }
+          enterFPSFly();
+        } else {
+          fpsLockPending = false;
+          stopFPSFly();
+        }
+      });
+      updateFlySpeed();
+    }
+
+    function requestFPSFly() {
+      if (MOBILE_QUALITY || fpsActive || fpsLockPending || !renderer.domElement.requestPointerLock) return;
+      stopMapFlight();
+      pressedKeys.clear();
+      fpsLockPending = true;
+      // Called directly by a user click; support promise and older void-returning APIs.
+      try {
+        const pending = renderer.domElement.requestPointerLock();
+        if (pending && pending.catch) pending.catch(() => {
+          fpsLockPending = false;
+          if (!fpsActive) document.getElementById('fly-status').textContent = 'Mouse lock was blocked. Click FPS Fly to try again.';
+        });
+      } catch (_) {
+        fpsLockPending = false;
+        document.getElementById('fly-status').textContent = 'Mouse lock is unavailable. Orbit / Map still works.';
+      }
+    }
+
+    function enterFPSFly() {
+      stopMapFlight();
+      mapDragPointerId = null;
+      controls.cancelInteraction();
+      fpsLockPending = false;
+      cancelPresetFlight();
+      isAnimatingCamera = false;
+      targetCameraPos = targetLookAt = null;
+      pressedKeys.clear();
+      // Empty OrbitControls' residual damping, then restore the exact visible pose.
+      fpsSavedPosition.copy(camera.position);
+      fpsSavedTarget.copy(controls.target);
+      fpsSavedQuaternion.copy(camera.quaternion);
+      fpsOrbitDistance = THREE.MathUtils.clamp(camera.position.distanceTo(controls.target), controls.minDistance, controls.maxDistance);
+      const damping = controls.enableDamping;
+      controls.enableDamping = false;
+      controls.update();
+      camera.position.copy(fpsSavedPosition);
+      controls.target.copy(fpsSavedTarget);
+      camera.quaternion.copy(fpsSavedQuaternion);
+      controls.enableDamping = damping;
+      controls.enabled = false;
+      fpsEuler.setFromQuaternion(camera.quaternion, 'YXZ');
+      fpsYaw = fpsTargetYaw = fpsEuler.y;
+      fpsPitch = fpsTargetPitch = fpsEuler.x;
+      fpsActive = true;
+      camera.near = 0.05; // Five metres instead of Orbit's 100m near plane for low flying.
+      camera.updateProjectionMatrix();
+      renderer.domElement.focus();
+      document.getElementById('fps-mode-btn').blur();
+      document.getElementById('fps-mode-btn').setAttribute('aria-pressed', 'true');
+      document.getElementById('orbit-mode-btn').setAttribute('aria-pressed', 'false');
+      document.getElementById('fly-status').textContent = 'Flying — press Esc to return to Orbit / Map and adjust speed.';
+      document.getElementById('fly-overlay').style.display = 'block';
+      lastFrameTime = performance.now();
+      labelVisibilityDirty = true;
+      requestRender();
+    }
+
+    function stopFPSFly() {
+      fpsLockPending = false;
+      if (document.pointerLockElement === renderer?.domElement) document.exitPointerLock();
+      if (!fpsActive) return;
+      fpsActive = false;
+      pressedKeys.clear();
+      // Put the orbit target on the current sightline. Never restore an old target
+      // or old rotation, which would snap the view after free flight.
+      camera.getWorldDirection(_forwardVec);
+      controls.target.copy(camera.position).addScaledVector(_forwardVec, fpsOrbitDistance);
+      // An upward FPS view may be outside Orbit's usual polar limit. Permit that
+      // existing angle until the user rotates back inside the normal map range.
+      controls.maxPolarAngle = Math.max(ORBIT_MAX_POLAR, Math.acos(THREE.MathUtils.clamp(-_forwardVec.y, -1, 1)) + 0.000001);
+      controls.enabled = true;
+      camera.near = 1;
+      camera.updateProjectionMatrix();
+      controls.update();
+      document.getElementById('fps-mode-btn').setAttribute('aria-pressed', 'false');
+      document.getElementById('orbit-mode-btn').setAttribute('aria-pressed', 'true');
+      document.getElementById('fly-overlay').style.display = 'none';
+      document.getElementById('fly-status').textContent = 'WASD to fly · Mouse to look · Space / Ctrl up / down · Shift faster · Esc to return';
+      labelVisibilityDirty = true;
+      requestRender();
+    }
+
+    function onFPSMouseMove(e) {
+      if (!fpsActive || document.pointerLockElement !== renderer.domElement || isTypingTarget(document.activeElement)) return;
+      fpsTargetYaw -= e.movementX * 0.002;
+      fpsTargetPitch = THREE.MathUtils.clamp(fpsTargetPitch - e.movementY * 0.002,
+        -Math.PI / 2 + 0.001, Math.PI / 2 - 0.001);
+      requestRender();
+    }
 
     function onKeyDown(e) {
-      if (e.target.closest('input, textarea, select, [contenteditable]') ||
-          e.ctrlKey || e.metaKey || e.altKey) return;
       const key = e.key.toLowerCase();
+      if (key === 'escape' && fpsActive) { stopFPSFly(); return; }
+      if (isTypingTarget(e.target) || isTypingTarget(document.activeElement) || e.metaKey || e.altKey) return;
       if (key === 'escape' && selectedPeakIndex >= 0) closeInspector();
-      if (!flightKeys.has(key)) return;
+      if (fpsActive) {
+        if (document.pointerLockElement !== renderer.domElement || !fpsKeys.has(key)) return;
+      } else if (e.ctrlKey || !flightKeys.has(key)) return;
       e.preventDefault();
       pressedKeys.add(key);
       cancelPresetFlight();
       isAnimatingCamera = false;
       targetCameraPos = targetLookAt = null;
+      if (!fpsActive && isMapFlightHeld()) startMapFlight();
+      requestRender();
     }
 
     function updateKeyboardFlight(dt) {
-      if (!pressedKeys.size) return;
       const held = (...keys) => keys.some(key => pressedKeys.has(key)) ? 1 : 0;
-      camera.getWorldDirection(_forwardVec);
-      _forwardVec.y = 0;
-      _forwardVec.normalize();
-      _rightVec.crossVectors(_forwardVec, camera.up).normalize();
-      flightDirection.copy(_forwardVec).multiplyScalar(
-        held('w', 'arrowup') - held('s', 'arrowdown'));
-      flightDirection.addScaledVector(_rightVec,
-        held('d', 'arrowright') - held('a', 'arrowleft'));
-      flightDirection.y = held('e') - held('q');
-      if (!flightDirection.lengthSq()) return;
-      flightDirection.normalize().multiplyScalar(Math.max(camera.position.y * 1.2, 100) * dt);
-      flightDirection.y = Math.max(flightDirection.y, 5 - camera.position.y);
-      camera.position.add(flightDirection);
-      controls.target.add(flightDirection);
+      if (fpsActive) {
+        // Exponential mouse smoothing is independent of refresh rate. YXZ keeps
+        // roll at zero; pitch never crosses either pole, so there are no flips.
+        const blend = 1 - Math.exp(-35 * dt);
+        const yawDelta = fpsTargetYaw - fpsYaw, pitchDelta = fpsTargetPitch - fpsPitch;
+        if (Math.abs(yawDelta) + Math.abs(pitchDelta) > 0.000001) {
+          fpsYaw += yawDelta * blend;
+          fpsPitch += pitchDelta * blend;
+          fpsEuler.set(fpsPitch, fpsYaw, 0, 'YXZ');
+          camera.quaternion.setFromEuler(fpsEuler);
+          requestRender();
+        }
+        if (!pressedKeys.size) return;
+        camera.getWorldDirection(_forwardVec);
+        _rightVec.set(1, 0, 0).applyQuaternion(camera.quaternion);
+        flightDirection.copy(_forwardVec).multiplyScalar(held('w') - held('s'));
+        flightDirection.addScaledVector(_rightVec, held('d') - held('a'));
+        flightDirection.y += held(' ') - held('control');
+        if (!flightDirection.lengthSq()) return;
+        flightDirection.normalize().multiplyScalar(flySpeed * SCALE * (held('shift') ? 4 : 1) * dt);
+        camera.position.add(flightDirection);
+        controls.target.copy(camera.position).addScaledVector(_forwardVec, fpsOrbitDistance);
+      } else {
+        if (!pressedKeys.size) return;
+        let lookChanged = false;
+        if (mapFlightActive) {
+          const blend = 1 - Math.exp(-35 * dt);
+          const yawDelta = mapTargetYaw - mapYaw, pitchDelta = mapTargetPitch - mapPitch;
+          if (Math.abs(yawDelta) + Math.abs(pitchDelta) > 0.000001) {
+            mapYaw += yawDelta * blend;
+            mapPitch += pitchDelta * blend;
+            mapLookEuler.set(mapPitch, mapYaw, 0, 'YXZ');
+            camera.quaternion.setFromEuler(mapLookEuler);
+            lookChanged = true;
+            requestRender();
+          }
+        }
+        camera.getWorldDirection(_forwardVec);
+        if (!mapFlightActive) _forwardVec.y = 0;
+        _forwardVec.normalize();
+        _rightVec.crossVectors(_forwardVec, camera.up).normalize();
+        flightDirection.copy(_forwardVec).multiplyScalar(held('w', 'arrowup') - held('s', 'arrowdown'));
+        flightDirection.addScaledVector(_rightVec, held('d', 'arrowright') - held('a', 'arrowleft'));
+        flightDirection.y += held('e') - held('q');
+        if (flightDirection.lengthSq()) {
+          flightDirection.normalize().multiplyScalar(Math.max(camera.position.y * 1.2, 100) * dt);
+          // Retain the map altitude floor, without lifting a lower GPS pose or
+          // moving a stationary camera just because the user looks around.
+          const floor = mapFlightActive ? Math.min(5, camera.position.y) : 5;
+          flightDirection.y = Math.max(flightDirection.y, floor - camera.position.y);
+          camera.position.add(flightDirection);
+        } else if (!lookChanged) return;
+        if (mapFlightActive) {
+          controls.target.copy(camera.position).addScaledVector(_forwardVec, mapFlightOrbitDistance);
+          controls.maxPolarAngle = Math.max(ORBIT_MAX_POLAR,
+            Math.acos(THREE.MathUtils.clamp(-_forwardVec.y, -1, 1)) + 0.000001);
+        } else controls.target.add(flightDirection);
+      }
       labelVisibilityDirty = true;
       requestRender();
     }
@@ -2472,13 +2769,16 @@ function copyPeakCoordinates(index) {
     // =========================================================================
     // 11. High-Performance Render Loop (Render-on-Demand + Smooth Damping)
     // =========================================================================
+    const lastLabelCameraPosition = new THREE.Vector3(Infinity, Infinity, Infinity);
+    const lastLabelCameraQuaternion = new THREE.Quaternion();
     let lastLabelUpdate = 0;
     let slowQualityFrames = 0;
     function animate() {
       requestAnimationFrame(animate);
       if (document.hidden) return;
       const now = performance.now();
-      const dt = Math.min((now - lastFrameTime) / 1000, 0.05);
+      const elapsed = (now - lastFrameTime) / 1000;
+      const dt = Math.min(elapsed, 0.05);
       lastFrameTime = now;
       if (MOBILE_QUALITY && (isAnimatingCamera || renderRequested) && dt > 0.04) {
         if (++slowQualityFrames >= 90 && renderer.getPixelRatio() > 0.75) {
@@ -2487,13 +2787,28 @@ function copyPeakCoordinates(index) {
           requestRender();
         }
       } else slowQualityFrames = 0;
-      updateKeyboardFlight(dt);
+      // Camera-owned flight keeps real-time speed through slow terrain frames;
+      // only long stalls are capped. Other map keys retain their old timestep.
+      updateKeyboardFlight((fpsActive || mapFlightActive) ? Math.min(elapsed, 0.25) : dt);
 
       updateCameraAnimation(now);
 
       // Preset flight owns the orbit until its endpoint; controls resume with
       // the same position, target, up vector and look-at orientation.
-      const controlsChanged = isPresetFlight ? false : controls.update();
+      const controlsChanged = (isPresetFlight || fpsActive || mapFlightActive) ? false : controls.update();
+      if (!fpsActive && !mapFlightActive && controls.maxPolarAngle > ORBIT_MAX_POLAR && controls.getPolarAngle() <= ORBIT_MAX_POLAR) {
+        controls.maxPolarAngle = ORBIT_MAX_POLAR;
+      }
+      // Track the actual pose, including free-camera look and any programmatic
+      // positioning. This does not depend on OrbitControls emitting 'change'.
+      const cameraMoved = lastLabelCameraPosition.distanceToSquared(camera.position) > 0.000001 ||
+        8 * (1 - Math.abs(lastLabelCameraQuaternion.dot(camera.quaternion))) > 0.000001;
+      if (cameraMoved) {
+        lastLabelCameraPosition.copy(camera.position);
+        lastLabelCameraQuaternion.copy(camera.quaternion);
+        labelVisibilityDirty = true;
+        requestRender();
+      }
       if (controlsChanged) {
         labelVisibilityDirty = true;
       }
@@ -2506,10 +2821,11 @@ function copyPeakCoordinates(index) {
 
       // Reactive Peak Labels Occlusion & Visibility Update
       if (labelVisibilityDirty && peakLabels.length &&
-          (!MOBILE_QUALITY || now - lastLabelUpdate > 100 || !controlsChanged)) {
+          (now - lastLabelUpdate >= (MOBILE_QUALITY ? 100 : 80))) {
         updatePeakLabelsVisibility();
         lastLabelUpdate = now;
         labelVisibilityDirty = false;
+        requestRender(); // Paint the final delayed refresh even after motion stops.
       }
 
       if (controlsChanged || isAnimatingCamera || renderRequested) {
@@ -2807,6 +3123,8 @@ function copyPeakCoordinates(index) {
 
     function focusUserLocation() {
   if (!userLocationGroup || !userLocationGroup.visible) return false;
+  stopMapFlight();
+  stopFPSFly();
   cancelPresetFlight();
 
   animStartCameraPos.copy(camera.position);
