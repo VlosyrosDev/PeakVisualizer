@@ -22,8 +22,8 @@ from rasterio.warp import Resampling, calculate_default_transform, reproject
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BASE_DIR)
 
-DEM_PATH = sys.argv[1] if len(sys.argv) > 1 else os.path.join(PROJECT_DIR, "dem.tiff")
-SATELLITE_PATH = sys.argv[2] if len(sys.argv) > 2 else os.path.join(PROJECT_DIR, "imagery.tiff")
+DEM_PATH = sys.argv[1] if len(sys.argv) > 1 else os.path.join(PROJECT_DIR, "dem.tif")
+SATELLITE_PATH = sys.argv[2] if len(sys.argv) > 2 else os.path.join(PROJECT_DIR, "imagery.tif")
 TARGET_CRS = "EPSG:32740"
 
 

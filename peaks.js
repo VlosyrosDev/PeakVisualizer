@@ -985,7 +985,7 @@ const PEAKS = [
     "isNamed": true,
     "elev": 767.6,
     "known": 812.0,
-    "url": "https://www.exploremauritius.org/?page_id=459",
+    "url": "https://vlosyros.dev/PeakVisualizer/lepouce/",
     "fclass": "forest",
     "lat": -20.198333541,
     "lon": 57.5288886731
@@ -5629,8 +5629,8 @@ const PEAKS = [
     "known": 828.0,
     "url": "https://www.exploremauritius.org/?page_id=247",
     "fclass": "forest",
-    "lat": -20.4088888994,
-    "lon": 57.4077774082
+    "lat": -20.408783999953556,
+    "lon": 57.40768723518423
   },
   {
     "id": 512,
