@@ -1084,7 +1084,7 @@ const PEAKS = [
     "isNamed": true,
     "elev": 626.7,
     "known": 633.0,
-    "url": "https://peakery.com/mont-ory-mauritius/",
+    "url": "https://vlosyros.dev/PeakVisualizer/ory/",
     "fclass": "forest",
     "lat": -20.2105549968,
     "lon": 57.4944439987
