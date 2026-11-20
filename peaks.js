@@ -1084,7 +1084,7 @@ const PEAKS = [
     "isNamed": true,
     "elev": 626.7,
     "known": 633.0,
-    "url": "https://vlosyros.dev/PeakVisualizer/ory/",
+    "url": "https://peakery.com/mont-ory-mauritius/",
     "fclass": "forest",
     "lat": -20.2105549968,
     "lon": 57.4944439987
@@ -1157,11 +1157,11 @@ const PEAKS = [
   },
   {
     "id": 105,
-    "name": "Unnamed Peak",
-    "isNamed": false,
+    "name": "Ory Highway Hump",
+    "isNamed": true,
     "elev": 371.5,
-    "known": null,
-    "url": "",
+    "known": 370.0,
+    "url": "https://vlosyros.dev/PeakVisualizer/oryhighwayhump/",
     "fclass": "forest",
     "lat": -20.2138882194,
     "lon": 57.4861111539
